@@ -89,14 +89,15 @@ if __name__ == '__main__':
 
         # Then, for each new ID, we initialise plume objects
         for i in np.arange(0, len(new_ids)):
-            plume = plumes.Plume(new_ids[i], date)
+            plume = plumes.Plume(lats, lons, sdf_now, new_ids[i], date)
             plume_objects = shelve.open('plume_objects')
             plume_objects[str(new_ids[i])] = plume
 
         # For old IDs, we just run an update. Plumes which no longer exist
         # are removed
         for i in np.arange(0, len(old_ids)):
-            pass
+            plume = plume_objects[str(old_ids[i])]
+
 
 
         """

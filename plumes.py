@@ -115,6 +115,9 @@ class Plume:
         # equal to the plume ID, then working out the centroid
         # Here we need a way to get the centroid for this object
 
+
+
+
     # So, at every timestep you have a whole load of SDFs
     # Then, when a new pixel becomes 1, an instance of this class is called
     # Can get a lat and lon for that, pass it to the object
@@ -125,11 +128,13 @@ class Plume:
     # So at every timestep you get the plumes and label them, then get
     # instances
 
-    def update_position(self):
+    def update_position(self, lats, lons, sdf_now, plume_id):
         """
         Takes an SDF map and updates the centroid lat and lon
         :return:
         """
+        valid_lons,
+
 
     def update_duration(self):
         """
