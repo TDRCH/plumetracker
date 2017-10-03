@@ -88,6 +88,7 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
 
 class Plume:
 
+    """
     plume_id = 0
     area = None
     centroid_lat = None
@@ -98,14 +99,19 @@ class Plume:
     centroid_direction = 0
     duration = 0
     emission_time = 0
+    track_lat = []
+    track_lon = []
     major_axis_position = 0
     minor_axis_position = 0
     LLJ_likelihood = 0
     CPO_likelihood = 0
-
+    """
     def __init__(self, plume_id, emission_time):
         self.plume_id = plume_id
         self.emission_time = emission_time
+        # Attributes to track the centroid position through time
+        self.track_lat = []
+        self.track_lon = []
 
     # So, at every timestep you have a whole load of SDFs
     # Then, when a new pixel becomes 1, an instance of this class is called
@@ -135,6 +141,9 @@ class Plume:
 
         self.centroid_lon = centroid_lon
         self.centroid_lat = centroid_lat
+
+        self.track_lat.append(centroid_lat)
+        self.track_lon.append(centroid_lon)
 
     def update_duration(self, date):
         """

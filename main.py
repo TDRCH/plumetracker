@@ -67,16 +67,17 @@ if __name__ == '__main__':
     used_colour_IDs = {}
     plume_objects = []
 
-    for date in datestrings:
-        print '\n' + date + '\n'
+    for date_i in np.arange(0, len(datestrings)):
+        print '\n' + datestrings[date_i] + '\n'
         totaltest = datetime.datetime.now()
         sdf = Dataset(
             '/ouce-home/data/satellite/meteosat/seviri/15-min/native/sdf/nc/'
-            'JUNE2012/SDF_v2/SDF_v2.' + date + '.nc')
+            'JUNE2012/SDF_v2/SDF_v2.' + datestrings[date_i] + '.nc')
         bt = Dataset(
             '/ouce-home/data/satellite/meteosat/seviri/15-min/native/bt/nc/'
             'JUNE2012/H-000-MSG2__-MSG2________-'
-            'IR_BrightnessTemperatures___-000005___-' + date + '-__.nc')
+            'IR_BrightnessTemperatures___-000005___-' + datestrings[date_i] +
+            '-__.nc')
 
         sdf_now = sdf.variables['bt108'][:]
 
@@ -95,16 +96,18 @@ if __name__ == '__main__':
         # Then, for each new ID, we initialise plume objects
         for i in np.arange(0, len(new_ids)):
             print 'Creating new plume', new_ids[i]
-            plume = plumes.Plume(new_ids[i], date)
+            plume = plumes.Plume(new_ids[i], datetimes[date_i])
             plume.update_position(lats, lons, sdf_plumes, new_ids[i])
+            plume.update_duration(datetimes[date_i])
             plume_objects[str(new_ids[i])] = plume
 
         # For old IDs, we just run an update.
         for i in np.arange(0, len(old_ids)):
-            print 'Updating position of plume', old_ids[i]
-            plume_objects[str(old_ids[i])].update_position(lats,
-                                                           lons, sdf_plumes,
-                                                           old_ids[i])
+            print 'Updating plume', old_ids[i]
+            plume = plume_objects[str(old_ids[i])]
+            plume.update_position(lats,lons, sdf_plumes, old_ids[i])
+            plume.update_duration(datetimes[date_i])
+            plume_objects[str(old_ids[i])] = plume
 
         # Plumes which no longer exist are removed
         if len(ids_previous) == 0:
@@ -118,9 +121,15 @@ if __name__ == '__main__':
         for i in np.arange(0, len(removed_ids)):
             del plume_objects[str(removed_ids[i])]
             print 'Deleted plume', removed_ids[i]
+            # Now ideally here we would create a plume archive, which would
+            # have a track for all past plumes and their duration and source
+            #  location
 
         sdf_previous = sdf_plumes
         ids_previous = plume_ids
+
+        print plume_objects['4'].track_lat
+        print plume_objects['4'].track_lon
         plume_objects.close()
 
         """
