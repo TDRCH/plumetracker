@@ -8,7 +8,7 @@ mechanism type
 """
 
 # Global function to scan the SDFs for unique plumes
-def scan_for_plumes(sdf_now, sdf_prev):
+def scan_for_plumes(sdf_now, sdf_prev, used_ids):
     """
     Scans a set of SDFs for plumes and labels them
     :param SDF_now:
@@ -27,6 +27,7 @@ def scan_for_plumes(sdf_now, sdf_prev):
         sdf_clusters, num = measurements.label(sdf_now)
         plume_ids = np.unique(sdf_clusters)
         large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
+        print large_plume_ids
         new_ids = large_plume_ids
     else:
         label_objects, nb_labels = ndi.label(sdf_now)
@@ -49,6 +50,7 @@ def scan_for_plumes(sdf_now, sdf_prev):
         overlaps = (sdf_clusters > 0) & (sdf_prev > 0)
         overlapping_ids = np.unique(sdf_clusters[overlaps])
         large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
+
         new_ids = [j for j in large_plume_ids if j not in overlapping_ids]
         if new_ids == [0]:
             new_ids = []
@@ -57,7 +59,6 @@ def scan_for_plumes(sdf_now, sdf_prev):
             new_id_bool = np.asarray([i != 0 for i in new_ids])
             if new_ids.shape[0] > 0:
                 new_ids = np.unique(new_ids[new_id_bool])
-
         old_id_array = np.zeros(np.shape(sdf_clusters))
         for i in overlapping_ids:
             prev_ids = sdf_prev[sdf_clusters == i]
@@ -66,29 +67,25 @@ def scan_for_plumes(sdf_now, sdf_prev):
             counts = np.bincount(prev_ids)
             prev_id = np.argmax(counts)
             # Set prev_ID to whatever that is
-            sdf_clusters[sdf_clusters == i] = prev_id
             old_id_array[sdf_clusters == i] = prev_id
+            sdf_clusters[sdf_clusters == i] = prev_id
         large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
+
+        # Fix the new IDs so that they follow directly from the previous
+        # largest one
+        if len(new_ids) > 0:
+            old_ids = np.unique(sdf_prev[sdf_prev != 0])
+            replacement_new_ids = np.arange(np.max(used_ids)+1, np.max(
+                used_ids)+1+len(new_ids))
+            for i in np.arange(0, len(new_ids)):
+                sdf_clusters[sdf_clusters == new_ids[i]] = (
+                    replacement_new_ids[i])
+                large_plume_ids[large_plume_ids == new_ids[i]] = (
+                replacement_new_ids[i])
+                new_ids[i] = replacement_new_ids[i]
+
     return sdf_clusters, new_ids, large_plume_ids
 
-# This returns a set of labeled plumes
-# We then loop through those at the beginning and make objects
-# You're doing label at every timestep, and where there is a plume which has
-#  absolutely no overlap with a previous plume, you're calling a Plume object
-# Then, for each existing plume, you're updating it. If the plume is gone,
-# it dies (as determined by update_position)
-
-# Ok so you start with a set of clusters. Loop through the clusters and get
-# a whole pile of objects
-
-# Then in the next timestep, you do the image processing again. Then loop
-# through each individual plume which is already active and call the update
-# methods (which may involve killing the plume)
-
-# But you need a global overlap function to extract new IDs, then in the
-# next timestep you will just get objects for each new plume
-
-## Class of plumes objects
 class Plume:
 
     plume_id = 0
@@ -110,14 +107,6 @@ class Plume:
         self.plume_id = plume_id
         self.emission_time = emission_time
 
-        # Now this function needs to work out for us where the new plume is
-        # located by using the SDF map and finding where there is an ID
-        # equal to the plume ID, then working out the centroid
-        # Here we need a way to get the centroid for this object
-
-
-
-
     # So, at every timestep you have a whole load of SDFs
     # Then, when a new pixel becomes 1, an instance of this class is called
     # Can get a lat and lon for that, pass it to the object
@@ -128,19 +117,32 @@ class Plume:
     # So at every timestep you get the plumes and label them, then get
     # instances
 
-    def update_position(self, lats, lons, sdf_now, plume_id):
+    def update_position(self, lats, lons, sdf_plumes, plume_id):
         """
         Takes an SDF map and updates the centroid lat and lon
         :return:
         """
-        valid_lons,
 
+        valid_lons = lons[sdf_plumes == plume_id]
+        valid_lats = lats[sdf_plumes == plume_id]
 
-    def update_duration(self):
+        # Calculate the centroid
+        sum_x = np.sum(valid_lons)
+        sum_y = np.sum(valid_lats)
+
+        centroid_lon = sum_x/valid_lons.shape[0]
+        centroid_lat = sum_y/valid_lons.shape[0]
+
+        self.centroid_lon = centroid_lon
+        self.centroid_lat = centroid_lat
+
+    def update_duration(self, date):
         """
-        Takes an SDF map and updates the centroid lat and lon
+        Updates the duration of the dust plume with the time since its emission
         :return:
         """
+
+        self.duration = date - self.emission_time
 
     def update_speed(self):
         """
@@ -153,28 +155,11 @@ class Plume:
         Takes an SDF map and updates the centroid lat and lon
         :return:
         """
-
-
 
     def move(self):
         pass
 
     def merge(self):
-        pass
-
-    def die(self):
-        pass
-
-    def update_position(self):
-        pass
-
-    def update_duration(self):
-        pass
-
-    def update_speed(self):
-        pass
-
-    def update_direction(self):
         pass
 
     def update_axes(self):

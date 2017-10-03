@@ -58,10 +58,12 @@ if __name__ == '__main__':
     m.drawcountries(linewidth=0.5)
 
     sdf_previous = None
+    ids_previous = []
     deep_conv_IDs_prev = None
     LLJ_plumes_IDs_prev = []
     k = 0
     available_colours = np.arange(0, 41)
+    used_ids = []
     used_colour_IDs = {}
     plume_objects = []
 
@@ -79,26 +81,47 @@ if __name__ == '__main__':
         sdf_now = sdf.variables['bt108'][:]
 
         sdf_plumes, new_ids, plume_ids = plumes.scan_for_plumes(sdf_now,
-                                                              sdf_previous)
+                                                              sdf_previous,
+                                                                used_ids)
 
-        sdf_previous = sdf_plumes
+        for i in new_ids:
+            used_ids.append(i)
 
-        new_bool = np.asarray([j in new_ids for j in plume_ids])
-        old_ids = plume_ids[new_bool]
+        old_bool = np.asarray([j in ids_previous for j in plume_ids])
+        old_ids = plume_ids[old_bool]
 
+        plume_objects = shelve.open('plume_objects')
 
         # Then, for each new ID, we initialise plume objects
         for i in np.arange(0, len(new_ids)):
-            plume = plumes.Plume(lats, lons, sdf_now, new_ids[i], date)
-            plume_objects = shelve.open('plume_objects')
+            print 'Creating new plume', new_ids[i]
+            plume = plumes.Plume(new_ids[i], date)
+            plume.update_position(lats, lons, sdf_plumes, new_ids[i])
             plume_objects[str(new_ids[i])] = plume
 
-        # For old IDs, we just run an update. Plumes which no longer exist
-        # are removed
+        # For old IDs, we just run an update.
         for i in np.arange(0, len(old_ids)):
-            plume = plume_objects[str(old_ids[i])]
+            print 'Updating position of plume', old_ids[i]
+            plume_objects[str(old_ids[i])].update_position(lats,
+                                                           lons, sdf_plumes,
+                                                           old_ids[i])
+
+        # Plumes which no longer exist are removed
+        if len(ids_previous) == 0:
+            removed_ids = []
+        else:
+            removed_bool = np.asarray([j not in plume_ids for j in
+                                       ids_previous])
+            removed_ids = ids_previous[removed_bool]
 
 
+        for i in np.arange(0, len(removed_ids)):
+            del plume_objects[str(removed_ids[i])]
+            print 'Deleted plume', removed_ids[i]
+
+        sdf_previous = sdf_plumes
+        ids_previous = plume_ids
+        plume_objects.close()
 
         """
         deep_conv_assoc, deep_conv_IDs = identify_convection(BT, SDF_plumes,
