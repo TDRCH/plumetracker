@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.ndimage import measurements
 from scipy import ndimage as ndi
+from skimage.measure import label, regionprops
 
 """
 Handling of plumes objects, including updating of attributes and testing for
@@ -144,6 +145,34 @@ class Plume:
 
         self.track_lat.append(centroid_lat)
         self.track_lon.append(centroid_lon)
+
+    def update_regionprops(self, sdf_plumes):
+        """
+        Updates the geometric properties of a plume, including major and
+        minor axis
+        :return:
+        """
+
+        label_img = label(sdf_plumes)
+        regions = regionprops(label_img)
+
+        # So here we'd need a way of identifying which is our plume,
+        # since the labels will all be different. Then we need the bounding
+        # box for that. I mean we could get it from the centroid I
+        # guess...
+
+        # So you specify the centroid and look for the nearest prop to that
+        # There must be a way of just matching the props that you get back
+        # with the active plume pixels from sdf_plumes
+
+        # Find out what the thing actually returns, then pull it out where
+        # the region is equal to the ID region
+
+        for props in regions:
+            y0s[k], x0s[k] = props.centroid
+            # x0_new, y0_new = resample_to_latlon(lons, lats, x0, y0)
+            minrs[k], mincs[k], maxrs[k], maxcs[k] = props.bbox
+            k += 1
 
     def update_duration(self, date):
         """

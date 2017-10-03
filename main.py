@@ -11,7 +11,7 @@ import utilities
 import plumes
 
 if __name__ == '__main__':
-    # NOTES #
+    #### NOTES ####
     # These parameters should be handled in a spreadsheet
     # Plotting should be handled in a separate function
 
@@ -92,6 +92,7 @@ if __name__ == '__main__':
         old_ids = plume_ids[old_bool]
 
         plume_objects = shelve.open('plume_objects')
+        plume_archive = shelve.open('plume_archive')
 
         # Then, for each new ID, we initialise plume objects
         for i in np.arange(0, len(new_ids)):
@@ -119,17 +120,14 @@ if __name__ == '__main__':
 
 
         for i in np.arange(0, len(removed_ids)):
+            print 'Archiving plume', removed_ids[i]
+            plume = plume_objects[str(removed_ids[i])]
+            plume_archive[str(removed_ids[i])] = plume
             del plume_objects[str(removed_ids[i])]
-            print 'Deleted plume', removed_ids[i]
-            # Now ideally here we would create a plume archive, which would
-            # have a track for all past plumes and their duration and source
-            #  location
 
         sdf_previous = sdf_plumes
         ids_previous = plume_ids
 
-        print plume_objects['4'].track_lat
-        print plume_objects['4'].track_lon
         plume_objects.close()
 
         """
