@@ -100,6 +100,8 @@ if __name__ == '__main__':
             plume = plumes.Plume(new_ids[i], datetimes[date_i])
             plume.update_position(lats, lons, sdf_plumes, new_ids[i])
             plume.update_duration(datetimes[date_i])
+            plume.update_bbox()
+            plume.update_majorminor_axes()
             plume_objects[str(new_ids[i])] = plume
 
         # For old IDs, we just run an update.
@@ -108,6 +110,8 @@ if __name__ == '__main__':
             plume = plume_objects[str(old_ids[i])]
             plume.update_position(lats,lons, sdf_plumes, old_ids[i])
             plume.update_duration(datetimes[date_i])
+            plume.update_bbox()
+            plume.update_majorminor_axes()
             plume_objects[str(old_ids[i])] = plume
 
         # Plumes which no longer exist are removed

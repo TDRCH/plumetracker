@@ -130,21 +130,80 @@ class Plume:
         :return:
         """
 
-        valid_lons = lons[sdf_plumes == plume_id]
-        valid_lats = lats[sdf_plumes == plume_id]
+        plume_lons = lons[sdf_plumes == plume_id]
+        plume_lats = lats[sdf_plumes == plume_id]
 
         # Calculate the centroid
-        sum_x = np.sum(valid_lons)
-        sum_y = np.sum(valid_lats)
+        sum_x = np.sum(plume_lons)
+        sum_y = np.sum(plume_lats)
 
-        centroid_lon = sum_x/valid_lons.shape[0]
-        centroid_lat = sum_y/valid_lons.shape[0]
+        centroid_lon = sum_x/plume_lons.shape[0]
+        centroid_lat = sum_y/plume_lons.shape[0]
 
         self.centroid_lon = centroid_lon
         self.centroid_lat = centroid_lat
 
         self.track_lat.append(centroid_lat)
         self.track_lon.append(centroid_lon)
+
+        self.plume_lons = plume_lons
+        self.plume_lats = plume_lats
+
+        print 'Centroid lat', centroid_lat
+        print 'Centroid lon', centroid_lon
+
+        print '\n'
+
+    def update_bbox(self):
+        """
+        Updates the bounding box coordinates associated with the plume
+        :param valid_lons:
+        :param valid_lats:
+        :return:
+        """
+
+        self.bbox_leftlon = np.min(self.plume_lons)
+        self.bbox_rightlon = np.max(self.plume_lons)
+
+        self.bbox_bottomlat = np.min(self.plume_lats)
+        self.bbox_toplat = np.max(self.plume_lats)
+
+        print self.bbox_leftlon
+        print self.bbox_rightlon
+        print self.bbox_bottomlat
+        print self.bbox_toplat
+        print '\n'
+
+    def update_majorminor_axes(self):
+        """
+        Updates the major and minor axes of a plume with PCA
+        :return:
+        """
+
+        # Subtract the mean from each dimension
+        lons = self.plume_lons - np.mean(self.plume_lons)
+        lats = self.plume_lats - np.mean(self.plume_lats)
+
+        # Calculate the covariance matrix of the coordinates
+        coords = np.vstack([lons, lats])
+        cov = np.cov(coords)
+        evals, evecs = np.linalg.eig(cov)
+
+        # Sort eigenvalues
+        sort_indices = np.argsort(evals)[::-1]
+        evec1, evec2 = evecs[:, sort_indices]
+
+        # Add the mean back in
+        self.lon_major = evec1[0]+np.mean(self.plume_lons)
+        self.lat_major = evec1[1]+np.mean(self.plume_lats)
+        self.lon_minor = evec2[0]+np.mean(self.plume_lons)
+        self.lat_minor = evec2[1]+np.mean(self.plume_lats)
+
+        print self.lon_major
+        print self.lat_major
+        print self.lon_minor
+        print self.lat_minor
+        print '\n'
 
     def update_regionprops(self, sdf_plumes):
         """
@@ -155,6 +214,13 @@ class Plume:
 
         label_img = label(sdf_plumes)
         regions = regionprops(label_img)
+
+        x0s = np.zeros((len(regions)))
+        y0s = np.zeros((len(regions)))
+        mincs = np.zeros((len(regions)))
+        minrs = np.zeros((len(regions)))
+        maxcs = np.zeros((len(regions)))
+        maxrs = np.zeros((len(regions)))
 
         # So here we'd need a way of identifying which is our plume,
         # since the labels will all be different. Then we need the bounding
@@ -168,11 +234,15 @@ class Plume:
         # Find out what the thing actually returns, then pull it out where
         # the region is equal to the ID region
 
+        k = 0
         for props in regions:
             y0s[k], x0s[k] = props.centroid
+            print y0s[k]
+            print x0s[k]
             # x0_new, y0_new = resample_to_latlon(lons, lats, x0, y0)
             minrs[k], mincs[k], maxrs[k], maxcs[k] = props.bbox
             k += 1
+
 
     def update_duration(self, date):
         """
