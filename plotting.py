@@ -28,6 +28,7 @@ def plot_plumes(plume_objects, sdf_plumes, lats, lons, bt, datetime, \
     m.drawcoastlines(linewidth=0.5)
     m.drawcountries(linewidth=0.5)
 
+    """
     data_array = np.zeros((lons.shape[0], lats.shape[1], 3))
 
     data_array[:, :, 0] = bt.variables['bt087'][:]
@@ -40,6 +41,7 @@ def plot_plumes(plume_objects, sdf_plumes, lats, lons, bt, datetime, \
     rgb_array = pinkdust.generate_image_from_array(data_regridded)
 
     m.imshow(rgb_array, extent=extent, origin='lower')
+    """
 
     for id in plume_objects:
         plume_bool = sdf_plumes == plume_objects[id].plume_id
@@ -48,15 +50,21 @@ def plot_plumes(plume_objects, sdf_plumes, lats, lons, bt, datetime, \
         plume_data[plume_bool] = plume_objects[id].plume_id
         m.contourf(lons, lats, plume_data)
 
-        print plume_objects[id].leading_edge_lon
-        print plume_objects[id].leading_edge_lat
-
         if plume_objects[id].leading_edge_lon != None:
             leading_edge_x, leading_edge_y = m(plume_objects[
                                                      id].leading_edge_lon,
                                                  plume_objects[
                                                      id].leading_edge_lat)
-            m.plot(leading_edge_x, leading_edge_y, 'bo', markersize=4)
+            m.plot(leading_edge_x, leading_edge_y,
+                   linewidth=1)
+
+        if len(plume_objects[id].track_lons) > 0:
+            print plume_objects[id].track_centroid_lat
+            print plume_objects[id].track_centroid_lon
+            track_x, track_y = m(plume_objects[id].track_centroid_lon,
+                                 plume_objects[id].track_centroid_lat)
+
+            m.plot(track_x, track_y, linewidth=1)
 
     plt.savefig('pinkdust_'+datestring+'.png')
     plt.close()

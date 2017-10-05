@@ -2,7 +2,10 @@ import numpy as np
 from scipy.ndimage import measurements
 from scipy import ndimage as ndi
 from skimage.measure import label, regionprops
+from skimage import feature
 import datetime
+import random
+from copy import deepcopy
 
 import utilities
 
@@ -31,7 +34,7 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
         sdf_clusters, num = measurements.label(sdf_now)
         plume_ids = np.unique(sdf_clusters)
         large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
-        print large_plume_ids
+        #print large_plume_ids
         new_ids = large_plume_ids
     else:
         label_objects, nb_labels = ndi.label(sdf_now)
@@ -92,24 +95,6 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
 
 class Plume:
 
-    """
-    plume_id = 0
-    area = None
-    centroid_lat = None
-    centroid_lon = None
-    source_lat = None
-    source_lon = None
-    centroid_speed = None
-    centroid_direction = 0
-    duration = 0
-    emission_time = 0
-    track_lat = []
-    track_lon = []
-    major_axis_position = 0
-    minor_axis_position = 0
-    LLJ_likelihood = 0
-    CPO_likelihood = 0
-    """
     def __init__(self, plume_id, emission_time):
         self.plume_id = plume_id
         self.emission_time = emission_time
@@ -119,6 +104,10 @@ class Plume:
         # The previous two timesteps are recorded
         self.track_lons = []
         self.track_lats = []
+        self.track_edges_lat = []
+        self.track_edges_lon = []
+        self.leading_edge_lon = None
+        self.leading_edge_lat = None
 
     # So, at every timestep you have a whole load of SDFs
     # Then, when a new pixel becomes 1, an instance of this class is called
@@ -168,86 +157,78 @@ class Plume:
         if len(self.track_lats) > 3:
             del self.track_lats[0]
 
-        print 'Centroid lat', centroid_lat
-        print 'Centroid lon', centroid_lon
+        #print 'Centroid lat', centroid_lat
+        #print 'Centroid lon', centroid_lon
 
-        print '\n'
+        #print '\n'
 
-    def update_leading_edge(self, sdf_plumes):
+    def update_leading_edge_4(self, sdf_plumes, lons, lats):
         """
-        Updates the identification of the pixels associated with a leading
-        edge on the plume
-        :return:
-        """
-
-        # Ok, very simple, just compare it to the last centroid
-
-        # Assuming this function is run AFTER the update_position,
-        # the previous centroid is two steps back in the track
-
-        if self.duration < datetime.timedelta(hours=0.75):
-            self.leading_edge_lon = None
-            self.leading_edge_lat = None
-        else:
-            previous_centroid_lat = self.track_centroid_lat[-2]
-            previous_centroid_lon = self.track_centroid_lon[-2]
-
-            plume_bool = sdf_plumes == self.plume_id
-
-            # Calculate distances of all coordinates from the previous centroid
-            distances = np.zeros((len(self.plume_lons)))
-            distances = np.asarray([utilities.haversine(self.plume_lons[j],
-                                                        self.plume_lats[j],
-                                                        previous_centroid_lon,
-                                                        previous_centroid_lat)
-                                    for j in np.arange(0,
-                                                       len(self.plume_lons))])
-
-            furthest_index = np.where(distances == np.max(distances))[0][0]
-
-            self.leading_edge_lon = self.plume_lons[furthest_index]
-            self.leading_edge_lat = self.plume_lats[furthest_index]
-
-    def update_leading_edge_2(self, sdf_plumes):
-        """
-        Attempt #2 looks for the edge point with the greatest distance from
-        the nearest edge of the previous plume
+        All those previous version were joke versions - this is the true
+        version, the only true version
         :param sdf_plumes:
         :return:
         """
 
-        # Identify the edge of the plume by scanning for an edge point then
-        # checking its neighbours
-
         plume_bool = sdf_plumes == self.plume_id
-        for idx, val in enumerate(plume_bool):
-            # Keep going until we find a value
-            if val:
-                # Check if there is an adjacent zero
-                left_x = idx[0]-1
-                left_y = idx[1]
-                above_x = idx[0]
-                above_y = idx[1]+1
-                right_x = idx[0]+1
-                right_y = idx[1]
-                below_x = idx[0]
-                below_y = idx[1]-1
+        edge_plume_bool = feature.canny(plume_bool, sigma=0.2)
 
-                adjacent_values = [plume_bool[left_x, left_y], plume_bool[
-                    above_x, above_y], plume_bool[right_x, right_y],
-                                   plume_bool[below_x, below_y]]
+        #print np.unique(plume_bool)
+        #print np.unique(edge_plume_bool)
 
-                # Now need to check if either False or 0 is in these
-                # adjacent values. If it is, then we know we're at an edge
-                # point. In that case we need to initiate a while loop which
-                #  searches for another edge point
-                # Otherwise, you need to continue the loop until we do find
-                # an edge point
-                # The while condition is that our current coordinates are
-                # not equal to the first edge point which you do find
+        edge_lons = lons[edge_plume_bool]
+        edge_lats = lats[edge_plume_bool]
 
+        if self.duration < datetime.timedelta(hours=0.75):
+            self.leading_edge_lon = None
+            self.leading_edge_lat = None
+            self.track_edges_lon.append(edge_lons)
+            self.track_edges_lat.append(edge_lats)
 
+        else:
+            #print 'Finding leading edge'
+            previous_edge_lons = self.track_edges_lon[-1]
+            previous_edge_lats = self.track_edges_lat[-1]
 
+            # We now need the edge with the greatest distance from its
+            # nearest neighbour
+
+            # So for each edge pixel, calculate the distance to all previous
+            # edge pixels
+            edge_distances = []
+
+            for i in np.arange(0, len(edge_lats)):
+                distances = []
+                for j in np.arange(0, len(previous_edge_lats)):
+                    distances.append(utilities.haversine(edge_lons[i],
+                                                        edge_lats[
+                        i], previous_edge_lons[j], previous_edge_lats[j]))
+                edge_distances.append(np.min(distances))
+
+            #print np.where(edge_distances == np.max(edge_distances))[0]
+            greatest_edge_distance_indices = np.where(edge_distances ==
+                                                      np.max(
+                                                          edge_distances))[0]
+
+            # Take the 5 largest distances as the leading edge
+            sorted_distances = np.asarray(deepcopy(edge_distances))
+            sorted_distance_indices = sorted_distances.argsort()[-5:][::-1]
+
+            self.leading_edge_lon = [edge_lons[j]
+                                for j in sorted_distance_indices]
+
+            self.leading_edge_lat = [edge_lats[j]
+                                for j in sorted_distance_indices]
+
+            self.track_edges_lon.append(edge_lons)
+            self.track_edges_lat.append(edge_lats)
+
+            # Remove edges from the track which are older than 2 timesteps
+            if len(self.track_edges_lon) > 3:
+                del self.track_edges_lon[0]
+
+            if len(self.track_edges_lat) > 3:
+                del self.track_edges_lat[0]
 
     def update_bbox(self):
         """
@@ -263,11 +244,11 @@ class Plume:
         self.bbox_bottomlat = np.min(self.plume_lats)
         self.bbox_toplat = np.max(self.plume_lats)
 
-        print self.bbox_leftlon
-        print self.bbox_rightlon
-        print self.bbox_bottomlat
-        print self.bbox_toplat
-        print '\n'
+        #print self.bbox_leftlon
+        #print self.bbox_rightlon
+        #print self.bbox_bottomlat
+        #print self.bbox_toplat
+        #print '\n'
 
     def update_majorminor_axes(self):
         """
@@ -294,11 +275,11 @@ class Plume:
         self.lon_minor = evec2[0]+np.mean(self.plume_lons)
         self.lat_minor = evec2[1]+np.mean(self.plume_lats)
 
-        print self.lon_major
-        print self.lat_major
-        print self.lon_minor
-        print self.lat_minor
-        print '\n'
+        #print self.lon_major
+        #print self.lat_major
+        #print self.lon_minor
+        #print self.lat_minor
+        #print '\n'
 
     def update_duration(self, date):
         """
@@ -339,39 +320,93 @@ class Plume:
     # Ok so if you make an __init__(self) function, python will run it every
     #  time the class is invoked.
 
-# Area attribute
-# Leading edge speed attribute
-# Centroid speed attribute
-# Centroid position attribute
-# Source latitude attribute
-# Source longitude attribute
-# Duration attribute
-# Emission timing attribute
-# Major axis attribute
-# Minor axis attribute
-# LLJ likelihood attribute
-# CPO likelihood attribute
-# Other likelihood attribute
+class Convection:
 
-# Move method
-# Merge method
-# Die method
-# Implement LLJ checks method
-# Implement CPO checks method
+    def __init__(self, cloud_id, initiation_time):
+        self.cloud_id = cloud_id
+        self.initiation_time = initiation_time
+        # Attributes to track the centroid position through time
+        self.track_centroid_lat = []
+        self.track_centroid_lon = []
+        # The previous two timesteps are recorded
+        self.track_lons = []
+        self.track_lats = []
+        self.track_edges_lat = []
+        self.track_edges_lon = []
+        self.leading_edge_lon = None
+        self.leading_edge_lat = None
 
-## Class of convection objects
-# Area attribute
-# Centroid position attribute
+    def update_position(self, lats, lons, conv_clouds, cloud_id):
+        """
+        Updates the position of the plume, including its centroid and point
+        coordinates, archiving them in a track
+        :return:
+        """
 
-# Move method
-# Merge method
-# Die method
+        cloud_bool = conv_clouds == cloud_id
 
-# Functions to cloud screen, generate SDFs and categorise to get instances
-# of objects, so main should only have to run these at each timestep,
-# and you'll get a whole bunch of objects generated within this function
-# which you don't see in main
+        cloud_lons = lons[cloud_bool]
+        cloud_lats = lats[cloud_bool]
 
-# Functions to plot a snapshot of all the plumes at a given moment in time (
-# this comes from an aggregate of plumes - doesn't make too much sense as a
-# part of a class)
+        # Calculate the centroid
+        sum_x = np.sum(cloud_lons)
+        sum_y = np.sum(cloud_lats)
+
+        centroid_lon = sum_x/cloud_lons.shape[0]
+        centroid_lat = sum_y/cloud_lons.shape[0]
+
+        self.centroid_lon = centroid_lon
+        self.centroid_lat = centroid_lat
+
+        self.track_centroid_lat.append(centroid_lat)
+        self.track_centroid_lon.append(centroid_lon)
+
+        self.plume_lons = cloud_lons
+        self.plume_lats = cloud_lats
+
+        self.track_lons.append(cloud_lons)
+        self.track_lats.append(cloud_lats)
+
+        # Only record the previous three timesteps (including this one)
+        if len(self.track_lons) > 3:
+            del self.track_lons[0]
+
+        if len(self.track_lats) > 3:
+            del self.track_lats[0]
+
+        #print 'Centroid lat', centroid_lat
+        #print 'Centroid lon', centroid_lon
+
+        #print '\n'
+
+    def update_duration(self, date):
+        """
+        Updates the duration of the dust plume with the time since its emission
+        :return:
+        """
+
+        self.duration = date - self.emission_time
+
+    def update_speed(self):
+        """
+        Takes an SDF map and updates the centroid lat and lon
+        :return:
+        """
+
+    def update_direction(self):
+        """
+        Takes an SDF map and updates the centroid lat and lon
+        :return:
+        """
+
+    def move(self):
+        pass
+
+    def merge(self):
+        pass
+
+    def update_axes(self):
+        pass
+
+    def update_mechanism_likelihood(self):
+        pass

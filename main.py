@@ -23,7 +23,7 @@ if __name__ == '__main__':
     # then you'd need to use a boolean on the lons and lats, but in that
     # case they'd have to match exactly. So you could look for the nearest
     # matching lat and lon in the plotting lats and lons?
-    #
+    # If a plume merges, its centroid track should be cleared
 
     SDF_0 = Dataset(
         '/ouce-home/data/satellite/meteosat/seviri/15-min/native/sdf/nc'
@@ -33,9 +33,9 @@ if __name__ == '__main__':
     year_upper = 2012
     month_lower = 6
     month_upper = 6
-    day_lower = 1
+    day_lower = 23
     day_upper = 30
-    hour_lower = 0
+    hour_lower = 20
     hour_upper = 23
     minute_lower = 0
     minute_upper = 45
@@ -85,6 +85,7 @@ if __name__ == '__main__':
     plume_archive = shelve.open('plume_archive')
 
     for date_i in np.arange(0, len(datestrings)):
+        runtime = datetimes[date_i] - datetimes[0]
         print '\n' + datestrings[date_i] + '\n'
         totaltest = datetime.datetime.now()
         sdf = Dataset(
@@ -98,6 +99,7 @@ if __name__ == '__main__':
 
         sdf_now = sdf.variables['bt108'][:]
 
+        # Get plumes first by scanning for them
         sdf_plumes, new_ids, plume_ids = plumes.scan_for_plumes(sdf_now,
                                                               sdf_previous,
                                                                 used_ids)
@@ -110,27 +112,27 @@ if __name__ == '__main__':
 
         # Then, for each new ID, we initialise plume objects
         for i in np.arange(0, len(new_ids)):
-            print 'Creating new plume', new_ids[i]
+            #print 'Creating new plume', new_ids[i]
             plume = plumes.Plume(new_ids[i], datetimes[date_i])
             plume.update_position(lats, lons, sdf_plumes, new_ids[i])
             plume.update_duration(datetimes[date_i])
             plume.update_bbox()
             plume.update_majorminor_axes()
-            plume.update_leading_edge(sdf_plumes)
+            #plume.update_leading_edge_4(sdf_plumes, lons, lats)
             plume_objects[str(new_ids[i])] = plume
 
         # For old IDs, we just run an update.
         for i in np.arange(0, len(old_ids)):
-            print 'Updating plume', old_ids[i]
+            #print 'Updating plume', old_ids[i]
             plume = plume_objects[str(old_ids[i])]
             plume.update_position(lats,lons, sdf_plumes, old_ids[i])
             plume.update_duration(datetimes[date_i])
             plume.update_bbox()
             plume.update_majorminor_axes()
-            plume.update_leading_edge(sdf_plumes)
+            #plume.update_leading_edge_4(sdf_plumes, lons, lats)
             plume_objects[str(old_ids[i])] = plume
 
-        # Plumes which no longer exist are removed
+        # Plumes which no longer exist are removed and archived
         if len(ids_previous) == 0:
             removed_ids = []
         else:
@@ -139,7 +141,7 @@ if __name__ == '__main__':
             removed_ids = ids_previous[removed_bool]
 
         for i in np.arange(0, len(removed_ids)):
-            print 'Archiving plume', removed_ids[i]
+            #print 'Archiving plume', removed_ids[i]
             plume = plume_objects[str(removed_ids[i])]
             plume_archive[str(removed_ids[i])] = plume
             del plume_objects[str(removed_ids[i])]
@@ -147,10 +149,9 @@ if __name__ == '__main__':
         sdf_previous = sdf_plumes
         ids_previous = plume_ids
 
-
-
-        plotting.plot_plumes(plume_objects, sdf_plumes, lats, lons, bt,
-                             datetimes[date_i], datestrings[date_i])
+        if runtime > datetime.timedelta(hours=0):
+            plotting.plot_plumes(plume_objects, sdf_plumes, lats, lons, bt,
+                                 datetimes[date_i], datestrings[date_i])
 
     plume_objects.close()
 
