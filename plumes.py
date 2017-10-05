@@ -2,6 +2,9 @@ import numpy as np
 from scipy.ndimage import measurements
 from scipy import ndimage as ndi
 from skimage.measure import label, regionprops
+import datetime
+
+import utilities
 
 """
 Handling of plumes objects, including updating of attributes and testing for
@@ -111,8 +114,11 @@ class Plume:
         self.plume_id = plume_id
         self.emission_time = emission_time
         # Attributes to track the centroid position through time
-        self.track_lat = []
-        self.track_lon = []
+        self.track_centroid_lat = []
+        self.track_centroid_lon = []
+        # The previous two timesteps are recorded
+        self.track_lons = []
+        self.track_lats = []
 
     # So, at every timestep you have a whole load of SDFs
     # Then, when a new pixel becomes 1, an instance of this class is called
@@ -126,12 +132,15 @@ class Plume:
 
     def update_position(self, lats, lons, sdf_plumes, plume_id):
         """
-        Takes an SDF map and updates the centroid lat and lon
+        Updates the position of the plume, including its centroid and point
+        coordinates, archiving them in a track
         :return:
         """
 
-        plume_lons = lons[sdf_plumes == plume_id]
-        plume_lats = lats[sdf_plumes == plume_id]
+        plume_bool = sdf_plumes == plume_id
+
+        plume_lons = lons[plume_bool]
+        plume_lats = lats[plume_bool]
 
         # Calculate the centroid
         sum_x = np.sum(plume_lons)
@@ -143,16 +152,102 @@ class Plume:
         self.centroid_lon = centroid_lon
         self.centroid_lat = centroid_lat
 
-        self.track_lat.append(centroid_lat)
-        self.track_lon.append(centroid_lon)
+        self.track_centroid_lat.append(centroid_lat)
+        self.track_centroid_lon.append(centroid_lon)
 
         self.plume_lons = plume_lons
         self.plume_lats = plume_lats
+
+        self.track_lons.append(plume_lons)
+        self.track_lats.append(plume_lats)
+
+        # Only record the previous three timesteps (including this one)
+        if len(self.track_lons) > 3:
+            del self.track_lons[0]
+
+        if len(self.track_lats) > 3:
+            del self.track_lats[0]
 
         print 'Centroid lat', centroid_lat
         print 'Centroid lon', centroid_lon
 
         print '\n'
+
+    def update_leading_edge(self, sdf_plumes):
+        """
+        Updates the identification of the pixels associated with a leading
+        edge on the plume
+        :return:
+        """
+
+        # Ok, very simple, just compare it to the last centroid
+
+        # Assuming this function is run AFTER the update_position,
+        # the previous centroid is two steps back in the track
+
+        if self.duration < datetime.timedelta(hours=0.75):
+            self.leading_edge_lon = None
+            self.leading_edge_lat = None
+        else:
+            previous_centroid_lat = self.track_centroid_lat[-2]
+            previous_centroid_lon = self.track_centroid_lon[-2]
+
+            plume_bool = sdf_plumes == self.plume_id
+
+            # Calculate distances of all coordinates from the previous centroid
+            distances = np.zeros((len(self.plume_lons)))
+            distances = np.asarray([utilities.haversine(self.plume_lons[j],
+                                                        self.plume_lats[j],
+                                                        previous_centroid_lon,
+                                                        previous_centroid_lat)
+                                    for j in np.arange(0,
+                                                       len(self.plume_lons))])
+
+            furthest_index = np.where(distances == np.max(distances))[0][0]
+
+            self.leading_edge_lon = self.plume_lons[furthest_index]
+            self.leading_edge_lat = self.plume_lats[furthest_index]
+
+    def update_leading_edge_2(self, sdf_plumes):
+        """
+        Attempt #2 looks for the edge point with the greatest distance from
+        the nearest edge of the previous plume
+        :param sdf_plumes:
+        :return:
+        """
+
+        # Identify the edge of the plume by scanning for an edge point then
+        # checking its neighbours
+
+        plume_bool = sdf_plumes == self.plume_id
+        for idx, val in enumerate(plume_bool):
+            # Keep going until we find a value
+            if val:
+                # Check if there is an adjacent zero
+                left_x = idx[0]-1
+                left_y = idx[1]
+                above_x = idx[0]
+                above_y = idx[1]+1
+                right_x = idx[0]+1
+                right_y = idx[1]
+                below_x = idx[0]
+                below_y = idx[1]-1
+
+                adjacent_values = [plume_bool[left_x, left_y], plume_bool[
+                    above_x, above_y], plume_bool[right_x, right_y],
+                                   plume_bool[below_x, below_y]]
+
+                # Now need to check if either False or 0 is in these
+                # adjacent values. If it is, then we know we're at an edge
+                # point. In that case we need to initiate a while loop which
+                #  searches for another edge point
+                # Otherwise, you need to continue the loop until we do find
+                # an edge point
+                # The while condition is that our current coordinates are
+                # not equal to the first edge point which you do find
+
+
+
 
     def update_bbox(self):
         """
@@ -204,45 +299,6 @@ class Plume:
         print self.lon_minor
         print self.lat_minor
         print '\n'
-
-    def update_regionprops(self, sdf_plumes):
-        """
-        Updates the geometric properties of a plume, including major and
-        minor axis
-        :return:
-        """
-
-        label_img = label(sdf_plumes)
-        regions = regionprops(label_img)
-
-        x0s = np.zeros((len(regions)))
-        y0s = np.zeros((len(regions)))
-        mincs = np.zeros((len(regions)))
-        minrs = np.zeros((len(regions)))
-        maxcs = np.zeros((len(regions)))
-        maxrs = np.zeros((len(regions)))
-
-        # So here we'd need a way of identifying which is our plume,
-        # since the labels will all be different. Then we need the bounding
-        # box for that. I mean we could get it from the centroid I
-        # guess...
-
-        # So you specify the centroid and look for the nearest prop to that
-        # There must be a way of just matching the props that you get back
-        # with the active plume pixels from sdf_plumes
-
-        # Find out what the thing actually returns, then pull it out where
-        # the region is equal to the ID region
-
-        k = 0
-        for props in regions:
-            y0s[k], x0s[k] = props.centroid
-            print y0s[k]
-            print x0s[k]
-            # x0_new, y0_new = resample_to_latlon(lons, lats, x0, y0)
-            minrs[k], mincs[k], maxrs[k], maxcs[k] = props.bbox
-            k += 1
-
 
     def update_duration(self, date):
         """

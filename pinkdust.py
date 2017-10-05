@@ -203,7 +203,6 @@ def regrid_data(lons, lats, target_lons, target_lats, array):
 
     return interp_dat
 
-
 def regrid_data_to_regular(lons, lats, array):
     """
     Regrids the irregular lons and lats produced by the reprojection so that
@@ -242,7 +241,6 @@ def regrid_data_to_regular(lons, lats, array):
     interp_dat_BTs[:, :, 2] = interp_dat_2
 
     return interp_dat_BTs
-
 
 def save_regridded_data_to_nc(filename, array_87, array_108, array_120,
                               cloudmask_regridded, lons, lats, date):
