@@ -6,6 +6,13 @@ from skimage import feature
 import datetime
 import random
 from copy import deepcopy
+from shapely.geometry import shape
+from shapely.ops import transform
+import pyproj
+import shapely.ops as ops
+from shapely.geometry.polygon import Polygon
+from functools import partial
+
 
 import utilities
 
@@ -21,6 +28,8 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
     :param SDF_now:
     :return:
     """
+
+    merge_ids = []
 
     if sdf_prev is None:
         label_objects, nb_labels = ndi.label(sdf_now)
@@ -69,6 +78,8 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
         old_id_array = np.zeros(np.shape(sdf_clusters))
         for i in overlapping_ids:
             prev_ids = sdf_prev[sdf_clusters == i]
+            # Remove zeros
+            prev_ids = prev_ids[prev_ids != 0]
             # Take the most common of the previous IDs as the one which should
             # be applied to the new plume
             counts = np.bincount(prev_ids)
@@ -76,6 +87,9 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
             # Set prev_ID to whatever that is
             old_id_array[sdf_clusters == i] = prev_id
             sdf_clusters[sdf_clusters == i] = prev_id
+            if len(np.unique(prev_ids)) > 1:
+                merge_ids.append(prev_id)
+
         large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
 
         # Fix the new IDs so that they follow directly from the previous
@@ -91,7 +105,7 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
                 replacement_new_ids[i])
                 new_ids[i] = replacement_new_ids[i]
 
-    return sdf_clusters, new_ids, large_plume_ids
+    return sdf_clusters, new_ids, large_plume_ids, merge_ids
 
 class Plume:
 
@@ -106,8 +120,21 @@ class Plume:
         self.track_lats = []
         self.track_edges_lat = []
         self.track_edges_lon = []
+        self.dates_observed = []
+        self.track_area = []
+        self.track_centroid_direction = []
         self.leading_edge_lon = None
         self.leading_edge_lat = None
+        self.merged = False
+        self.track_speed_centroid = []
+        self.pre_merge_track_lons = []
+        self.pre_merge_track_lats = []
+        self.pre_merge_track_centroid_lat = []
+        self.pre_merge_track_centroid_lon = []
+        self.pre_merge_track_area = []
+        self.pre_merge_track_speed_centroid = []
+        self.pre_merge_dates_observed = []
+        self.pre_merge_track_direction = []
 
     # So, at every timestep you have a whole load of SDFs
     # Then, when a new pixel becomes 1, an instance of this class is called
@@ -162,6 +189,28 @@ class Plume:
 
         #print '\n'
 
+    def update_area(self):
+
+        cop = {"type": "Polygon", "coordinates": [zip(self.plume_lons,
+                                                      self.plume_lats)]}
+        s = shape(cop)
+
+        geom = Polygon([(a, b) for a, b in zip(self.plume_lons,
+                                               self.plume_lats)])
+        geom_area = ops.transform(
+            partial(
+                pyproj.transform,
+                pyproj.Proj(init='EPSG:4326'),
+                pyproj.Proj(
+                    proj='aea',
+                    lat1=geom.bounds[1],
+                    lat2=geom.bounds[3])),
+            geom)
+
+        # Store area in m^2
+        self.area = geom_area.area
+        self.track_area.append(geom_area.area)
+
     def update_leading_edge_4(self, sdf_plumes, lons, lats):
         """
         All those previous version were joke versions - this is the true
@@ -179,14 +228,23 @@ class Plume:
         edge_lons = lons[edge_plume_bool]
         edge_lats = lats[edge_plume_bool]
 
+        # No leading edge if the duration of the plume is too low
         if self.duration < datetime.timedelta(hours=0.75):
             self.leading_edge_lon = None
             self.leading_edge_lat = None
             self.track_edges_lon.append(edge_lons)
             self.track_edges_lat.append(edge_lats)
 
+        # Same applies for duration since a merge
+        if self.merged == True:
+            duration_since_merge = self.dates_observed[-1] - self.merge_date
+            if duration_since_merge < datetime.timedelta(hours=0.75):
+                self.leading_edge_lon = None
+                self.leading_edge_lat = None
+                self.track_edges_lon.append(edge_lons)
+                self.track_edges_lat.append(edge_lats)
+
         else:
-            #print 'Finding leading edge'
             previous_edge_lons = self.track_edges_lon[-1]
             previous_edge_lats = self.track_edges_lat[-1]
 
@@ -275,12 +333,6 @@ class Plume:
         self.lon_minor = evec2[0]+np.mean(self.plume_lons)
         self.lat_minor = evec2[1]+np.mean(self.plume_lats)
 
-        #print self.lon_major
-        #print self.lat_major
-        #print self.lon_minor
-        #print self.lat_minor
-        #print '\n'
-
     def update_duration(self, date):
         """
         Updates the duration of the dust plume with the time since its emission
@@ -288,24 +340,124 @@ class Plume:
         """
 
         self.duration = date - self.emission_time
+        self.dates_observed.append(date)
 
-    def update_speed(self):
+    def update_max_extent(self):
         """
-        Takes an SDF map and updates the centroid lat and lon
+        If the plume is at its greatest extent so far, updates the maximum
+        extent
         :return:
         """
 
-    def update_direction(self):
+        # Note: if this is too costly, just store the date and use that to
+        # index the lats and lons later
+        if len(self.track_area[:]) <= 1:
+            self.maximum_extent_lons = self.plume_lons
+            self.maximum_extent_lats = self.plume_lats
+            self.maximum_extent_time = self.dates_observed[-1]
+
+        elif self.area >= np.max(self.track_area[:-1]):
+            #print 'True for ', self.plume_id
+            self.maximum_extent_lons = self.plume_lons
+            self.maximum_extent_lats = self.plume_lats
+            self.maximum_extent_time = self.dates_observed[-1]
+
+    def update_GPE_speed(self):
         """
-        Takes an SDF map and updates the centroid lat and lon
+        Updates the greatest plume extent speed of the plume at the end of
+        its lifecycle
         :return:
         """
+
+        # Distance of each pixel in the maximum extent from the source region
+        plume_distances = [utilities.haversine(self.maximum_extent_lons[j],
+                                               self.maximum_extent_lats[j],
+                                               self.track_centroid_lon[0],
+                                               self.track_centroid_lat[0])
+                           for j in
+                           np.arange(0, len(self.maximum_extent_lons))]
+
+        greatest_plume_distance = np.max(plume_distances)
+
+        date_of_max_extent = self.maximum_extent_time
+        secs_to_max_extent = (date_of_max_extent-self.dates_observed[
+            0]).seconds
+        if secs_to_max_extent == 0:
+            self.speed_gpe = np.nan
+        else:
+            self.speed_gpe = (greatest_plume_distance*1000)/secs_to_max_extent
+        #print 'Plume', self.plume_id
+        #print 'GPE speed', self.speed_gpe
+
+    def update_centroid_speed(self):
+        """
+        Updates the centroid speed of the plume and its track. This must be
+        run after updating the duration.
+        :return:
+        """
+
+        centroid_distance = utilities.haversine(self.centroid_lon,
+                                                self.centroid_lat,
+                                                self.track_centroid_lon[-2],
+                                                self.track_centroid_lat[-2])
+
+        secs_since_previous = (self.dates_observed[-1] - self.dates_observed[
+            -2]).seconds
+
+        self.speed_centroid = (centroid_distance*1000/secs_since_previous)
+        self.track_speed_centroid.append(self.speed_centroid)
+        #print 'Plume', self.plume_id
+        #print 'Centroid speed', self.speed_centroid
+        #print 'Mean centroid speed', np.nanmean(self.track_speed_centroid)
+
+    def merge(self):
+        """
+        Used when the plume has merged - moves all track data to a pre-merge
+        track, so that velocities etc are not calculated across a merge
+        :return:
+        """
+
+        self.merged = True
+        self.merge_date = self.dates_observed[-1]
+
+        self.pre_merge_track_lons = self.track_lons
+        self.pre_merge_track_lats = self.track_lats
+        self.pre_merge_track_centroid_lat = self.track_centroid_lat
+        self.pre_merge_track_centroid_lon = self.track_centroid_lon
+        self.pre_merge_track_area = self.track_area
+        self.pre_merge_track_speed_centroid = self.track_speed_centroid
+        self.pre_merge_dates_observed = self.dates_observed
+        self.pre_merge_track_centroid_direction = self.track_centroid_direction
+
+        self.track_lons = []
+        self.track_lats = []
+        self.track_centroid_lat = []
+        self.track_centroid_lon = []
+        self.track_area = []
+        self.track_speed_centroid = []
+        self.dates_observed = []
+        self.track_centroid_direction = []
+
+    def update_centroid_direction(self):
+        """
+        Identify the direction in which the centroid has travelled since the
+        previous timestep
+        :return:
+        """
+
+        self.centroid_direction = utilities.\
+            calculate_initial_compass_bearing((self.track_centroid_lat[-2],
+                                               self.track_centroid_lon[-2]),
+                                              (self.centroid_lat,
+                                               self.centroid_lon))
+
+        #print self.centroid_direction
+
+        self.track_centroid_direction.append(self.centroid_direction)
 
     def move(self):
         pass
 
-    def merge(self):
-        pass
 
     def update_axes(self):
         pass

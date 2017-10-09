@@ -1,5 +1,6 @@
 import numpy as np
 import datetime
+import math
 from math import radians, cos, sin, asin, sqrt
 
 def get_datetime_objects(time_params):
@@ -70,3 +71,48 @@ def get_neighbours(p, exclude_p=True, shape=None):
         neighbours = neighbours[valid]
 
     return neighbours
+
+def polyarea(x, y):
+    return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
+
+def angle_between(p1, p2):
+    ang1 = np.arctan2(*p1[::-1])
+    ang2 = np.arctan2(*p2[::-1])
+    return np.rad2deg((ang1 - ang2) % (2 * np.pi))
+
+def calculate_initial_compass_bearing(pointA, pointB):
+    """
+    CREDIT: https://gist.github.com/jeromer/2005586
+    Calculates the bearing between two points.
+    :Parameters:
+      - `pointA: The tuple representing the latitude/longitude for the
+        first point. Latitude and longitude must be in decimal degrees
+      - `pointB: The tuple representing the latitude/longitude for the
+        second point. Latitude and longitude must be in decimal degrees
+    :Returns:
+      The bearing in degrees
+    :Returns Type:
+      float
+    """
+
+    if (type(pointA) != tuple) or (type(pointB) != tuple):
+        raise TypeError("Only tuples are supported as arguments")
+
+    lat1 = math.radians(pointA[0])
+    lat2 = math.radians(pointB[0])
+
+    diffLong = math.radians(pointB[1] - pointA[1])
+
+    x = math.sin(diffLong) * math.cos(lat2)
+    y = math.cos(lat1) * math.sin(lat2) - (math.sin(lat1)
+            * math.cos(lat2) * math.cos(diffLong))
+
+    initial_bearing = math.atan2(x, y)
+
+    # Now we have the initial bearing but math.atan2 return values
+    # from -180 to + 180 which is not what we want for a compass bearing
+    # The solution is to normalize the initial bearing as shown below
+    initial_bearing = math.degrees(initial_bearing)
+    compass_bearing = (initial_bearing + 360) % 360
+
+    return compass_bearing

@@ -25,20 +25,16 @@ if __name__ == '__main__':
     # matching lat and lon in the plotting lats and lons?
     # If a plume merges, its centroid track should be cleared
 
-    SDF_0 = Dataset(
-        '/ouce-home/data/satellite/meteosat/seviri/15-min/native/sdf/nc'
-        '/JUNE2012/SDF_v2/SDF_v2.201206221800.nc')
-
     year_lower = 2012
     year_upper = 2012
     month_lower = 6
     month_upper = 6
     day_lower = 23
     day_upper = 30
-    hour_lower = 20
-    hour_upper = 23
+    hour_lower = 0
+    hour_upper = 0
     minute_lower = 0
-    minute_upper = 45
+    minute_upper = 0
 
     time_params = np.array([year_lower, year_upper, month_lower,
                             month_upper, day_lower, day_upper,
@@ -57,15 +53,6 @@ if __name__ == '__main__':
     latmask = lats > 90
     lons = np.ma.array(lons, mask=lonmask)
     lats = np.ma.array(lats, mask=latmask)
-    fig, ax = plt.subplots()
-    extent = (-21, 31, 10, 41)
-    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
-                llcrnrlat=extent[2], urcrnrlat=extent[3],
-                resolution='i')
-
-    m.drawcoastlines(linewidth=0.5)
-    m.drawcountries(linewidth=0.5)
-
     sdf_previous = None
     ids_previous = []
     deep_conv_IDs_prev = None
@@ -100,9 +87,10 @@ if __name__ == '__main__':
         sdf_now = sdf.variables['bt108'][:]
 
         # Get plumes first by scanning for them
-        sdf_plumes, new_ids, plume_ids = plumes.scan_for_plumes(sdf_now,
-                                                              sdf_previous,
-                                                                used_ids)
+        sdf_plumes, new_ids, plume_ids, merge_ids = plumes.scan_for_plumes(
+            sdf_now,
+            sdf_previous,
+            used_ids)
 
         for i in new_ids:
             used_ids.append(i)
@@ -118,8 +106,15 @@ if __name__ == '__main__':
             plume.update_duration(datetimes[date_i])
             plume.update_bbox()
             plume.update_majorminor_axes()
+            plume.update_area()
+            plume.update_max_extent()
             #plume.update_leading_edge_4(sdf_plumes, lons, lats)
             plume_objects[str(new_ids[i])] = plume
+
+        # For merged IDs, we move the tracks to pre-merge tracks
+        for i in np.arange(0, len(merge_ids)):
+            plume = plume_objects[str(merge_ids[i])]
+            plume.merge()
 
         # For old IDs, we just run an update.
         for i in np.arange(0, len(old_ids)):
@@ -129,6 +124,10 @@ if __name__ == '__main__':
             plume.update_duration(datetimes[date_i])
             plume.update_bbox()
             plume.update_majorminor_axes()
+            plume.update_area()
+            plume.update_centroid_speed()
+            plume.update_centroid_direction()
+            plume.update_max_extent()
             #plume.update_leading_edge_4(sdf_plumes, lons, lats)
             plume_objects[str(old_ids[i])] = plume
 
@@ -143,15 +142,23 @@ if __name__ == '__main__':
         for i in np.arange(0, len(removed_ids)):
             #print 'Archiving plume', removed_ids[i]
             plume = plume_objects[str(removed_ids[i])]
+            plume.update_GPE_speed()
             plume_archive[str(removed_ids[i])] = plume
             del plume_objects[str(removed_ids[i])]
 
         sdf_previous = sdf_plumes
         ids_previous = plume_ids
 
-        if runtime > datetime.timedelta(hours=0):
-            plotting.plot_plumes(plume_objects, sdf_plumes, lats, lons, bt,
-                                 datetimes[date_i], datestrings[date_i])
+        #if runtime > datetime.timedelta(hours=0):
+        #    plotting.plot_plumes(plume_objects, sdf_plumes, lats, lons, bt,
+        #                         datetimes[date_i], datestrings[date_i])
+
+    # After the script has finished, add remaining plumes to the plume archive
+    for i in plume_objects:
+        plume_archive[i] = plume_objects[i]
+
+    # Summary plots
+    plotting.plot_plume_count(plume_archive)
 
     plume_objects.close()
 
