@@ -108,6 +108,8 @@ if __name__ == '__main__':
             plume.update_majorminor_axes()
             plume.update_area()
             plume.update_max_extent()
+            plume.update_centroid_speed()
+            plume.update_centroid_direction()
             #plume.update_leading_edge_4(sdf_plumes, lons, lats)
             plume_objects[str(new_ids[i])] = plume
 

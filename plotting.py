@@ -110,10 +110,11 @@ def plot_plume_count(plume_archive):
     ax.set_ylim(0, 25)
     plt.grid()
 
-    plt.savefig('plume_count_through_time_23rd_24th.png')
+    plt.savefig('plume_count_through_time_3.png')
     plt.close()
 
-def plot_plume_area(plume_archive):
+def plot_plume_area(plume_archive, min_lat=None, min_lon=None,
+                    max_lat=None, max_lon=None):
     """
     Plots the mean area of emitted plumes through time
     Note that if there are many plumes they will simply outweight the large
@@ -128,8 +129,22 @@ def plot_plume_area(plume_archive):
     date_dictionary = {}
 
     for i in plume_archive:
-        areas = plume_archive[i].track_area
-        dates = plume_archive[i].dates_observed
+        if min_lat != None:
+            plume_centroids_lat = plume_archive[i].track_centroid_lat
+            plume_centroids_lon = plume_archive[i].track_centroid_lon
+            include_bool_lat = np.asarray([j >= min_lat and j <= max_lat for j
+                                           in
+                                       plume_centroids_lat])
+            include_bool_lon = np.asarray([j >= min_lon and j <= max_lon for j
+                                           in plume_centroids_lon])
+            combined_bool = np.asarray([a and b for a, b in zip(
+                include_bool_lat, include_bool_lon)])
+
+            areas = np.asarray(plume_archive[i].track_area)[combined_bool]
+            dates = np.asarray(plume_archive[i].dates_observed)[combined_bool]
+        else:
+            areas = np.asarray(plume_archive[i].track_area)
+            dates = np.asarray(plume_archive[i].dates_observed)
 
         # If this date is not present in the dictionary, create a list and
         # append areas to it. Otherwise just add entries to the existing key
@@ -165,7 +180,8 @@ def plot_plume_area(plume_archive):
     plt.savefig('plume_area_through_time.png')
     plt.close()
 
-def plot_plume_total_area(plume_archive):
+def plot_plume_total_area(plume_archive, min_lat=None, min_lon=None,
+                    max_lat=None, max_lon=None):
     """
     Plots the total area of emitted plumes through time
     Note that if there are many plumes they will simply outweigh the large
@@ -180,8 +196,22 @@ def plot_plume_total_area(plume_archive):
     date_dictionary = {}
 
     for i in plume_archive:
-        areas = plume_archive[i].track_area
-        dates = plume_archive[i].dates_observed
+        if min_lat != None:
+            plume_centroids_lat = plume_archive[i].track_centroid_lat
+            plume_centroids_lon = plume_archive[i].track_centroid_lon
+            include_bool_lat = np.asarray([j >= min_lat and j <= max_lat for j
+                                           in
+                                       plume_centroids_lat])
+            include_bool_lon = np.asarray([j >= min_lon and j <= max_lon for j
+                                           in plume_centroids_lon])
+            combined_bool = np.asarray([a and b for a, b in zip(
+                include_bool_lat, include_bool_lon)])
+
+            areas = np.asarray(plume_archive[i].track_area)[combined_bool]
+            dates = np.asarray(plume_archive[i].dates_observed)[combined_bool]
+        else:
+            areas = np.asarray(plume_archive[i].track_area)
+            dates = np.asarray(plume_archive[i].dates_observed)
 
         # If this date is not present in the dictionary, create a list and
         # append areas to it. Otherwise just add entries to the existing key
@@ -217,7 +247,8 @@ def plot_plume_total_area(plume_archive):
     plt.savefig('plume_total_area_through_time.png')
     plt.close()
 
-def plot_plume_centroid_speed(plume_archive):
+def plot_plume_centroid_speed(plume_archive, min_lat=None, min_lon=None,
+                    max_lat=None, max_lon=None):
     """
     Plots the mean speed of centroids through time
     :param plume_archive:
@@ -230,8 +261,23 @@ def plot_plume_centroid_speed(plume_archive):
     date_dictionary = {}
 
     for i in plume_archive:
-        speeds = plume_archive[i].track_speed_centroid
-        dates = plume_archive[i].dates_observed
+        if min_lat != None:
+            plume_centroids_lat = plume_archive[i].track_centroid_lat
+            plume_centroids_lon = plume_archive[i].track_centroid_lon
+            include_bool_lat = np.asarray([j >= min_lat and j <= max_lat for j
+                                           in
+                                       plume_centroids_lat])
+            include_bool_lon = np.asarray([j >= min_lon and j <= max_lon for j
+                                           in plume_centroids_lon])
+            combined_bool = np.asarray([a and b for a, b in zip(
+                include_bool_lat, include_bool_lon)])
+
+            speeds = np.asarray(plume_archive[i].track_speed_centroid)[
+                combined_bool]
+            dates = np.asarray(plume_archive[i].dates_observed)[combined_bool]
+        else:
+            speeds = np.asarray(plume_archive[i].track_area)
+            dates = np.asarray(plume_archive[i].dates_observed)
 
         # If this date is not present in the dictionary, create a list and
         # append areas to it. Otherwise just add entries to the existing key
@@ -245,7 +291,7 @@ def plot_plume_centroid_speed(plume_archive):
     # Average each entry
     for i in date_dictionary:
         speed_list = date_dictionary[i]
-        averaged_area = np.nansum(speed_list)
+        averaged_area = np.nanmean(speed_list)
         date_dictionary[i] = averaged_area
 
     # Plot
@@ -260,11 +306,77 @@ def plot_plume_centroid_speed(plume_archive):
 
     # plt.gcf().autofmt_xdate()
 
-    ax.set_ylabel('Plume speed')
+    ax.set_ylabel('Plume speed (m/s)')
     ax.set_xlabel('Time')
     plt.grid()
 
     plt.savefig('plume_speed_through_time.png')
+    plt.close()
+
+def plot_plume_centroid_direction(plume_archive, min_lat=None, min_lon=None,
+                    max_lat=None, max_lon=None):
+    """
+    Plots the mean direction of centroids through time
+    :param plume_archive:
+    :return:
+    """
+
+    plt.close()
+    fig, ax = plt.subplots()
+
+    date_dictionary = {}
+
+    for i in plume_archive:
+        if min_lat != None:
+            plume_centroids_lat = plume_archive[i].track_centroid_lat
+            plume_centroids_lon = plume_archive[i].track_centroid_lon
+            include_bool_lat = np.asarray([j >= min_lat and j <= max_lat for j
+                                           in
+                                       plume_centroids_lat])
+            include_bool_lon = np.asarray([j >= min_lon and j <= max_lon for j
+                                           in plume_centroids_lon])
+            combined_bool = np.asarray([a and b for a, b in zip(
+                include_bool_lat, include_bool_lon)])
+
+            directions = np.asarray(plume_archive[i].track_centroid_direction)[
+                combined_bool]
+            dates = np.asarray(plume_archive[i].dates_observed)[combined_bool]
+        else:
+            directions = np.asarray(plume_archive[i].track_centroid_direction)
+            dates = np.asarray(plume_archive[i].dates_observed)
+
+        # If this date is not present in the dictionary, create a list and
+        # append areas to it. Otherwise just add entries to the existing key
+        for j in np.arange(0, len(dates)):
+            if dates[j] in date_dictionary:
+                date_dictionary[dates[j]].append(directions[j])
+            else:
+                date_dictionary[dates[j]] = []
+                date_dictionary[dates[j]].append(directions[j])
+
+    # Average each entry
+    for i in date_dictionary:
+        direction_list = date_dictionary[i]
+        averaged_area = np.nanmean(direction_list)
+        date_dictionary[i] = averaged_area
+
+    # Plot
+    lists = sorted(date_dictionary.items())
+    x, y = zip(*lists)
+
+    ax.plot(x, y, color='black')
+
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d/%Y'))
+    plt.gca().xaxis.set_major_locator(mdates.DayLocator())
+    plt.gca().xaxis.set_minor_locator(mdates.HourLocator())
+
+    # plt.gcf().autofmt_xdate()
+
+    ax.set_ylabel('Plume direction (deg)')
+    ax.set_xlabel('Time')
+    plt.grid()
+
+    plt.savefig('plume_direction_through_time.png')
     plt.close()
 
 # Function to plot mean plume size through time

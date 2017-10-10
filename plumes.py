@@ -396,16 +396,30 @@ class Plume:
         :return:
         """
 
-        centroid_distance = utilities.haversine(self.centroid_lon,
-                                                self.centroid_lat,
-                                                self.track_centroid_lon[-2],
-                                                self.track_centroid_lat[-2])
+        # Only get a centroid speed if we have a previous centroid and we
+        # haven't merged recently
+        if self.duration <= datetime.timedelta(hours=0.5):
+            self.speed_centroid = np.nan
+            self.track_speed_centroid.append(self.speed_centroid)
+        elif self.merged == True:
+            if (self.dates_observed[-1] - self.merge_date) <= \
+                    datetime.timedelta(hours=0.5):
+                self.speed_centroid = np.nan
+                self.track_speed_centroid.append(self.speed_centroid)
 
-        secs_since_previous = (self.dates_observed[-1] - self.dates_observed[
-            -2]).seconds
+        else:
+            centroid_distance = utilities.haversine(self.centroid_lon,
+                                                    self.centroid_lat,
+                                                    self.track_centroid_lon[
+                                                        -2],
+                                                    self.track_centroid_lat[
+                                                        -2])
+            secs_since_previous = (self.dates_observed[-1] -
+                                   self.dates_observed[
+                -2]).seconds
 
-        self.speed_centroid = (centroid_distance*1000/secs_since_previous)
-        self.track_speed_centroid.append(self.speed_centroid)
+            self.speed_centroid = (centroid_distance*1000/secs_since_previous)
+            self.track_speed_centroid.append(self.speed_centroid)
         #print 'Plume', self.plume_id
         #print 'Centroid speed', self.speed_centroid
         #print 'Mean centroid speed', np.nanmean(self.track_speed_centroid)
@@ -445,15 +459,26 @@ class Plume:
         :return:
         """
 
-        self.centroid_direction = utilities.\
-            calculate_initial_compass_bearing((self.track_centroid_lat[-2],
-                                               self.track_centroid_lon[-2]),
-                                              (self.centroid_lat,
-                                               self.centroid_lon))
+        # Only get a centroid direction if we have a previous centroid and
+        # haven't merged recently
+        if self.duration <= datetime.timedelta(hours=0.5):
+            self.centroid_direction = np.nan
+            self.track_centroid_direction.append(self.centroid_direction)
+        elif self.merged == True:
+            if (self.dates_observed[-1] - self.merge_date) <= \
+                    datetime.timedelta(hours=0.5):
+                self.centroid_direction = np.nan
+                self.track_centroid_direction.append(self.centroid_direction)
+        else:
+            self.centroid_direction = utilities.\
+                calculate_initial_compass_bearing((self.track_centroid_lat[-2],
+                                                   self.track_centroid_lon[-2]),
+                                                  (self.centroid_lat,
+                                                   self.centroid_lon))
 
-        #print self.centroid_direction
+            #print self.centroid_direction
 
-        self.track_centroid_direction.append(self.centroid_direction)
+            self.track_centroid_direction.append(self.centroid_direction)
 
     def move(self):
         pass
