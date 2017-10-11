@@ -8,6 +8,7 @@ from mpop.satout import netcdf4
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.cbook as cbook
+import matplotlib.cm as cm
 
 import pinkdust
 
@@ -32,7 +33,8 @@ def plot_plumes(plume_objects, sdf_plumes, lats, lons, bt, datetime, \
     m.drawcountries(linewidth=0.5)
 
     """
-    data_array = np.zeros((lons.shape[0], lats.shape[1], 3))
+    data_array = np.zeros((lons.shape[0], lats.shape[1], 3))Wutzu984
+
 
     data_array[:, :, 0] = bt.variables['bt087'][:]
     data_array[:, :, 1] = bt.variables['bt108'][:]
@@ -99,11 +101,11 @@ def plot_plume_count(plume_archive):
 
     ax.plot(unique_dates, date_count, color='black')
 
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d/%Y'))
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%Y'))
     plt.gca().xaxis.set_major_locator(mdates.DayLocator())
     plt.gca().xaxis.set_minor_locator(mdates.HourLocator())
 
-    #plt.gcf().autofmt_xdate()
+    plt.gcf().autofmt_xdate()
 
     ax.set_ylabel('Plume count')
     ax.set_xlabel('Time')
@@ -167,13 +169,13 @@ def plot_plume_area(plume_archive, min_lat=None, min_lon=None,
 
     ax.plot(x, y, color='black')
 
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d/%Y'))
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%Y'))
     plt.gca().xaxis.set_major_locator(mdates.DayLocator())
     plt.gca().xaxis.set_minor_locator(mdates.HourLocator())
 
-    #plt.gcf().autofmt_xdate()
+    plt.gcf().autofmt_xdate()
 
-    ax.set_ylabel('Mean plume area')
+    ax.set_ylabel('Mean plume area (m^2)')
     ax.set_xlabel('Time')
     plt.grid()
 
@@ -234,7 +236,7 @@ def plot_plume_total_area(plume_archive, min_lat=None, min_lon=None,
 
     ax.plot(x, y, color='black')
 
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d/%Y'))
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%Y'))
     plt.gca().xaxis.set_major_locator(mdates.DayLocator())
     plt.gca().xaxis.set_minor_locator(mdates.HourLocator())
 
@@ -276,7 +278,7 @@ def plot_plume_centroid_speed(plume_archive, min_lat=None, min_lon=None,
                 combined_bool]
             dates = np.asarray(plume_archive[i].dates_observed)[combined_bool]
         else:
-            speeds = np.asarray(plume_archive[i].track_area)
+            speeds = np.asarray(plume_archive[i].track_speed_centroid)
             dates = np.asarray(plume_archive[i].dates_observed)
 
         # If this date is not present in the dictionary, create a list and
@@ -291,8 +293,8 @@ def plot_plume_centroid_speed(plume_archive, min_lat=None, min_lon=None,
     # Average each entry
     for i in date_dictionary:
         speed_list = date_dictionary[i]
-        averaged_area = np.nanmean(speed_list)
-        date_dictionary[i] = averaged_area
+        averaged_speed = np.nanmean(speed_list)
+        date_dictionary[i] = averaged_speed
 
     # Plot
     lists = sorted(date_dictionary.items())
@@ -300,7 +302,7 @@ def plot_plume_centroid_speed(plume_archive, min_lat=None, min_lon=None,
 
     ax.plot(x, y, color='black')
 
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d/%Y'))
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%Y'))
     plt.gca().xaxis.set_major_locator(mdates.DayLocator())
     plt.gca().xaxis.set_minor_locator(mdates.HourLocator())
 
@@ -309,6 +311,8 @@ def plot_plume_centroid_speed(plume_archive, min_lat=None, min_lon=None,
     ax.set_ylabel('Plume speed (m/s)')
     ax.set_xlabel('Time')
     plt.grid()
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
 
     plt.savefig('plume_speed_through_time.png')
     plt.close()
@@ -366,7 +370,7 @@ def plot_plume_centroid_direction(plume_archive, min_lat=None, min_lon=None,
 
     ax.plot(x, y, color='black')
 
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d/%Y'))
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%Y'))
     plt.gca().xaxis.set_major_locator(mdates.DayLocator())
     plt.gca().xaxis.set_minor_locator(mdates.HourLocator())
 
@@ -375,8 +379,99 @@ def plot_plume_centroid_direction(plume_archive, min_lat=None, min_lon=None,
     ax.set_ylabel('Plume direction (deg)')
     ax.set_xlabel('Time')
     plt.grid()
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.ylim(0, 360)
 
     plt.savefig('plume_direction_through_time.png')
+    plt.close()
+
+def plot_emission_speed_map(plume_archive, lats, lons, min_lat=None,
+                            min_lon=None,
+                    max_lat=None, max_lon=None):
+
+    """
+    For each gridbox in the SDF region of choice, plots the mean
+    emission speed of plumes emitted from that gridbox
+    :param plume_archive:
+    :param lats:
+    :param lons:
+    :param min_lat:
+    :param min_lon:
+    :param max_lat:
+    :param max_lon:
+    :return:
+    """
+
+    plt.close()
+
+    fig, ax = plt.subplots()
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    latlon_dictionary = {}
+
+    for i in plume_archive:
+        # If the plume has merged, the plume source is found in the
+        # pre-merge track
+        if plume_archive[i].merged == True:
+            if len(plume_archive[i].pre_merge_track_speed_centroid) < 4:
+                continue
+            emission_lat = plume_archive[i].pre_merge_track_centroid_lat[0]
+            emission_lon = plume_archive[i].pre_merge_track_centroid_lon[0]
+            emission_speeds = plume_archive[i].pre_merge_track_speed_centroid[
+                              3]
+            print emission_speeds
+        else:
+            if len(plume_archive[i].track_speed_centroid) < 4:
+                continue
+            emission_lat = plume_archive[i].track_centroid_lat[0]
+            emission_lon = plume_archive[i].track_centroid_lon[0]
+            emission_speeds = plume_archive[i].track_speed_centroid[3]
+
+        # If this entry already exists in the dictionary we just append to it
+        if (emission_lat, emission_lon) in latlon_dictionary:
+            latlon_dictionary[(emission_lat, emission_lon)].append(np.nanmean(
+                emission_speeds))
+        else:
+            latlon_dictionary[(emission_lat, emission_lon)] = []
+            latlon_dictionary[(emission_lat, emission_lon)].append(
+                np.nanmean(emission_speeds))
+
+    # Average together lists for each entry in the dictionary
+    for i in latlon_dictionary:
+        latlon_dictionary[i] = np.nanmean(latlon_dictionary[i])
+
+    latlons = np.asarray([i for i in latlon_dictionary])
+    lats = np.asarray([j[0] for j in latlons])
+    lons = np.asarray([j[1] for j in latlons])
+    data = np.asarray([latlon_dictionary[i] for i in latlon_dictionary])
+
+    #lons, lats = np.meshgrid(lons, lats)
+
+    print lons.shape
+    print lats.shape
+    print data.shape
+
+    # What you actually need is to bin the data into discrete gridboxes,
+    # because the centroid lat/lons will not align with the SDF lat/lons
+    # So you round each one to the nearest degree, for instance,
+
+    # So say you just have the right lats and the right lons - how would you
+    #  then get a meshgrid?
+
+    # Generate a data array which will be plotted
+    #data_array[:] = np.nan
+
+    m.scatter(lons, lats, c=data, cmap=cm.RdYlBu_r)
+
+    plt.savefig('emission_speed_map.png')
+
     plt.close()
 
 # Function to plot mean plume size through time

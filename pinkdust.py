@@ -10,6 +10,8 @@ from PIL import Image
 from pyproj import Proj
 from pyresample.geometry import SwathDefinition
 from pyresample.kd_tree import resample_nearest
+import pygrib
+import glob
 
 def load_channels(datetime):
     """
@@ -152,7 +154,6 @@ def get_datetime_objects(time_params):
 
     return datetimes
 
-
 def reproject_to_latlon(nc):
     """
     Reprojects geostationary projection coordinates to latitude and longitude
@@ -282,3 +283,39 @@ def save_regridded_data_to_nc(filename, array_87, array_108, array_120,
     cloudmask[:] = cloudmask_regridded
     # Forgot to write to time coordinate variable
     ncfile.close()
+
+def process_cloud_mask_grib(date, lats, lons):
+    """
+    Extracts cloud mask data from a GRIB file, removes invalid values and
+    regrids to regular
+    :param date:
+    :param lats:
+    :param lons:
+    :return:
+    """
+
+    # Pull out cloud mask data to be regridded and added to the nc file
+    # glob is used to allow a wildcard
+
+    clouddata = pygrib.open(glob.glob(
+        '/ouce-home/students/hert4173/cloud_mask_grib_files/MSG*-'
+        'SEVI-MSGCLMK-0100-0100-' + date.strftime(
+            "%Y%m%d%H%M%S") + '*')[0])
+    grb = clouddata.select()[0]
+    cloudmaskarray = grb.values[:, ::-1]
+    cloudlats, cloudlons = grb.latlons()
+
+    cloudmaskarray[cloudmaskarray >= 3] = np.nan
+    cloudlats[cloudlats > 90] = np.nan
+    cloudlats[cloudlats < -90] = np.nan
+    cloudlons[cloudlons > 180] = np.nan
+
+    # Generate a regular lat/lon grid for the cloud mask
+    regular_lons = np.linspace(np.min(lons), np.max(lons), lons.shape[1])
+    regular_lats = np.linspace(np.min(lats), np.max(lats), lats.shape[0])
+
+    # Regrid the cloud mask to the above regular grid
+    cloudmask_regridded = regrid_data(cloudlons, cloudlats, regular_lons,
+                                      regular_lats, cloudmaskarray)
+
+    return cloudmask_regridded

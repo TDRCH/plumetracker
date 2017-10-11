@@ -9,6 +9,7 @@ import shelve
 
 import utilities
 import plumes
+import pinkdust
 import plotting
 
 if __name__ == '__main__':
@@ -25,16 +26,21 @@ if __name__ == '__main__':
     # matching lat and lon in the plotting lats and lons?
     # If a plume merges, its centroid track should be cleared
 
+    # Cloud mask is to be read in from grib and regridded with a function in
+    #  pinkdust. Then you feed it to the scan_for_plumes function, which'll
+    # return a whole pile of IDs. Those in turn can go to the convection
+    # object generator.
+
     year_lower = 2012
     year_upper = 2012
     month_lower = 6
     month_upper = 6
-    day_lower = 23
+    day_lower = 1
     day_upper = 30
     hour_lower = 0
-    hour_upper = 0
+    hour_upper = 23
     minute_lower = 0
-    minute_upper = 0
+    minute_upper = 45
 
     time_params = np.array([year_lower, year_upper, month_lower,
                             month_upper, day_lower, day_upper,
@@ -47,6 +53,8 @@ if __name__ == '__main__':
     lonlats = Dataset(
         '/ouce-home/data/satellite/meteosat/seviri/15-min/native/'
         'lonlats.NA_MiddleEast.nc')
+
+    # These need to be regridded to regular for consistency with cloud mask
     lons = lonlats.variables['longitude'][:]
     lats = lonlats.variables['latitude'][:]
     lonmask = lons > 360
@@ -54,12 +62,15 @@ if __name__ == '__main__':
     lons = np.ma.array(lons, mask=lonmask)
     lats = np.ma.array(lats, mask=latmask)
     sdf_previous = None
+    clouds_previous = None
     ids_previous = []
+    cloud_ids_previous = []
     deep_conv_IDs_prev = None
     LLJ_plumes_IDs_prev = []
     k = 0
     available_colours = np.arange(0, 41)
     used_ids = []
+    used_cloud_ids = []
     used_colour_IDs = {}
     plume_objects = []
 
@@ -84,6 +95,12 @@ if __name__ == '__main__':
             'IR_BrightnessTemperatures___-000005___-' + datestrings[date_i] +
             '-__.nc')
 
+        #clouds_now = np.load('/ouce-home/students/hert4173/'
+        #                        'cloud_mask_numpy_files/cloudmask'
+        #    ''+datetimes[date_i]
+        #    .strftime(
+        #    "%Y%m%d%H%M%S")+'.npy')
+
         sdf_now = sdf.variables['bt108'][:]
 
         # Get plumes first by scanning for them
@@ -92,11 +109,30 @@ if __name__ == '__main__':
             sdf_previous,
             used_ids)
 
+        # Get clouds by scanning for them
+        #clouds, new_cloud_ids, cloud_ids, merge_cloud_ids = \
+        #    plumes.scan_for_plumes(clouds_now,
+        #                           clouds_previous,
+        #                           used_cloud_ids)
+
+        # Now just need a way whereby the plume objects can interact with
+        # cloud objects, e.g. check if they are near them or check if clouds
+        #  have been initiated on top of plumes, or check their propagaton
+        # relative to that of the cloud idk
         for i in new_ids:
             used_ids.append(i)
 
+        #for i in new_cloud_ids:
+        #    used_cloud_ids.append(i)
+
         old_bool = np.asarray([j in ids_previous for j in plume_ids])
-        old_ids = plume_ids[old_bool]
+        if len(old_bool) > 0:
+            old_ids = plume_ids[old_bool]
+        else:
+            old_ids = []
+
+        #old_cloud_bool = np.asarray([j in clouds_previous for j in cloud_ids])
+        #old_cloud_ids = cloud_ids[old_cloud_bool]
 
         # Then, for each new ID, we initialise plume objects
         for i in np.arange(0, len(new_ids)):
@@ -163,5 +199,6 @@ if __name__ == '__main__':
     plotting.plot_plume_count(plume_archive)
 
     plume_objects.close()
+    plume_archive.close()
 
 

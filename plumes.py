@@ -1,3 +1,8 @@
+"""
+Handling of plumes objects, including updating of attributes and testing for
+mechanism type
+"""
+
 import numpy as np
 from scipy.ndimage import measurements
 from scipy import ndimage as ndi
@@ -13,13 +18,7 @@ import shapely.ops as ops
 from shapely.geometry.polygon import Polygon
 from functools import partial
 
-
 import utilities
-
-"""
-Handling of plumes objects, including updating of attributes and testing for
-mechanism type
-"""
 
 # Global function to scan the SDFs for unique plumes
 def scan_for_plumes(sdf_now, sdf_prev, used_ids):
@@ -59,7 +58,7 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
         large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
 
         # Increase the plume_ID so that they are all new
-        old_id_max = np.max(sdf_prev)
+        old_id_max = np.max(used_ids)
         sdf_clusters[sdf_clusters != 0] += old_id_max
 
         # Get an array of plumes which are overlapping
@@ -99,6 +98,7 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
             replacement_new_ids = np.arange(np.max(used_ids)+1, np.max(
                 used_ids)+1+len(new_ids))
             for i in np.arange(0, len(new_ids)):
+
                 sdf_clusters[sdf_clusters == new_ids[i]] = (
                     replacement_new_ids[i])
                 large_plume_ids[large_plume_ids == new_ids[i]] = (
