@@ -2,6 +2,8 @@ import numpy as np
 import datetime
 import math
 from math import radians, cos, sin, asin, sqrt
+from matplotlib.colors import LinearSegmentedColormap
+import matplotlib.pyplot as plt
 
 def get_datetime_objects(time_params):
     """
@@ -30,6 +32,36 @@ def get_datetime_objects(time_params):
     # Get an array of datetime objects for each 15 minute interval
     datetimes = np.array([datetime_lower + datetime.timedelta(minutes=i) for
                           i in minutes_range])
+    return datetimes
+
+def get_daily_datetime_objects(time_params):
+    """
+    Generates an array of datetime objects at daily intervals within the input
+    time bounds
+    :param time_params: an array of integers corresponding to time bounds
+    :return datetimes: array of datetime objects
+    """
+
+    # Get the lower and upper bound of the datetime objects
+    datetime_lower = datetime.datetime(time_params[0], time_params[2],
+                                       time_params[4], time_params[6],
+                                       time_params[8])
+    datetime_upper = datetime.datetime(time_params[1], time_params[3],
+                                       time_params[5], time_params[7],
+                                       time_params[9])
+
+    # Get the difference between the two dates in minutes using a timedelta
+    # object
+    td = datetime_upper - datetime_lower
+    days_difference = td.days
+
+    # Get an array of minute values with 15 minute intervals
+    days_range = np.arange(0, td.days + 1)
+
+    # Get an array of datetime objects for each 15 minute interval
+    datetimes = np.array([datetime_lower + datetime.timedelta(days=i)
+                          for i in days_range])
+
     return datetimes
 
 def haversine(lon1, lat1, lon2, lat2):
@@ -116,3 +148,31 @@ def calculate_initial_compass_bearing(pointA, pointB):
     compass_bearing = (initial_bearing + 360) % 360
 
     return compass_bearing
+
+def cmap_discretize(cmap, n_colors):
+    """Return a discrete colormap from the continuous colormap cmap.
+
+    Parameters
+    ----------
+    cmap : str or colormap object
+        Colormap to discretize.
+    n_colors : int
+        Number of discrete colors to divide `cmap` into.
+
+    Returns
+    ----------
+    discrete_cmap : LinearSegmentedColormap
+        Discretized colormap.
+    """
+
+    if type(cmap) == basestring:
+        cmap = plt.get_cmap(cmap)
+    colors_i = np.concatenate((np.linspace(0, 1., n_colors), (0., 0., 0., 0.)))
+    colors_rgba = cmap(colors_i)
+    indices = np.linspace(0, 1., n_colors + 1)
+    cdict = {}
+    for ki, key in enumerate(('red', 'green', 'blue')):
+        cdict[key] = [(indices[i], colors_rgba[i - 1, ki], colors_rgba[i, ki])
+                      for i in range(n_colors + 1)]
+    # Return colormap object.
+    return LinearSegmentedColormap(cmap.name + "_%d" % n_colors, cdict, 1024)

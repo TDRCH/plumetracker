@@ -398,12 +398,12 @@ class Plume:
 
         # Only get a centroid speed if we have a previous centroid and we
         # haven't merged recently
-        if self.duration <= datetime.timedelta(hours=0.5):
+        if self.duration < datetime.timedelta(hours=0.25):
             self.speed_centroid = np.nan
             self.track_speed_centroid.append(self.speed_centroid)
         elif self.merged == True:
-            if (self.dates_observed[-1] - self.merge_date) <= \
-                    datetime.timedelta(hours=0.5):
+            if (self.dates_observed[-1] - self.merge_date) < \
+                    datetime.timedelta(hours=0.25):
                 self.speed_centroid = np.nan
                 self.track_speed_centroid.append(self.speed_centroid)
 
@@ -461,12 +461,12 @@ class Plume:
 
         # Only get a centroid direction if we have a previous centroid and
         # haven't merged recently
-        if self.duration <= datetime.timedelta(hours=0.5):
+        if self.duration < datetime.timedelta(hours=0.25):
             self.centroid_direction = np.nan
             self.track_centroid_direction.append(self.centroid_direction)
         elif self.merged == True:
-            if (self.dates_observed[-1] - self.merge_date) <= \
-                    datetime.timedelta(hours=0.5):
+            if (self.dates_observed[-1] - self.merge_date) < \
+                    datetime.timedelta(hours=0.25):
                 self.centroid_direction = np.nan
                 self.track_centroid_direction.append(self.centroid_direction)
         else:
@@ -479,6 +479,15 @@ class Plume:
             #print self.centroid_direction
 
             self.track_centroid_direction.append(self.centroid_direction)
+
+    def check_conv_association(self, clouds):
+        """
+        Checks whether the plume is located in proximity to the cloud mask
+        :param clouds:
+        :return:
+        """
+
+
 
     def move(self):
         pass

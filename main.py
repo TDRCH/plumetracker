@@ -25,11 +25,15 @@ if __name__ == '__main__':
     # case they'd have to match exactly. So you could look for the nearest
     # matching lat and lon in the plotting lats and lons?
     # If a plume merges, its centroid track should be cleared
+    # What happens if a plume merges more than once??
+    # What happens if a plume breaks away?
 
     # Cloud mask is to be read in from grib and regridded with a function in
     #  pinkdust. Then you feed it to the scan_for_plumes function, which'll
     # return a whole pile of IDs. Those in turn can go to the convection
     # object generator.
+
+    run = False
 
     year_lower = 2012
     year_upper = 2012
@@ -74,131 +78,133 @@ if __name__ == '__main__':
     used_colour_IDs = {}
     plume_objects = []
 
-    plume_objects = shelve.open('plume_objects')
-    plume_objects.clear()
+    if run:
 
-    convection_objects = shelve.open('convection_objects')
-    convection_objects.clear()
+        plume_objects = shelve.open('plume_objects')
+        plume_objects.clear()
 
-    plume_archive = shelve.open('plume_archive')
+        convection_objects = shelve.open('convection_objects')
+        convection_objects.clear()
 
-    for date_i in np.arange(0, len(datestrings)):
-        runtime = datetimes[date_i] - datetimes[0]
-        print '\n' + datestrings[date_i] + '\n'
-        totaltest = datetime.datetime.now()
-        sdf = Dataset(
-            '/ouce-home/data/satellite/meteosat/seviri/15-min/native/sdf/nc/'
-            'JUNE2012/SDF_v2/SDF_v2.' + datestrings[date_i] + '.nc')
-        bt = Dataset(
-            '/ouce-home/data/satellite/meteosat/seviri/15-min/native/bt/nc/'
-            'JUNE2012/H-000-MSG2__-MSG2________-'
-            'IR_BrightnessTemperatures___-000005___-' + datestrings[date_i] +
-            '-__.nc')
+        plume_archive = shelve.open('plume_archive')
 
-        #clouds_now = np.load('/ouce-home/students/hert4173/'
-        #                        'cloud_mask_numpy_files/cloudmask'
-        #    ''+datetimes[date_i]
-        #    .strftime(
-        #    "%Y%m%d%H%M%S")+'.npy')
+        for date_i in np.arange(0, len(datestrings)):
+            runtime = datetimes[date_i] - datetimes[0]
+            print '\n' + datestrings[date_i] + '\n'
+            totaltest = datetime.datetime.now()
+            sdf = Dataset(
+                '/ouce-home/data/satellite/meteosat/seviri/15-min/native/sdf/nc/'
+                'JUNE2012/SDF_v2/SDF_v2.' + datestrings[date_i] + '.nc')
+            bt = Dataset(
+                '/ouce-home/data/satellite/meteosat/seviri/15-min/native/bt/nc/'
+                'JUNE2012/H-000-MSG2__-MSG2________-'
+                'IR_BrightnessTemperatures___-000005___-' + datestrings[date_i] +
+                '-__.nc')
 
-        sdf_now = sdf.variables['bt108'][:]
+            #clouds_now = np.load('/ouce-home/students/hert4173/'
+            #                        'cloud_mask_numpy_files/cloudmask'
+            #    ''+datetimes[date_i]
+            #    .strftime(
+            #    "%Y%m%d%H%M%S")+'.npy')
 
-        # Get plumes first by scanning for them
-        sdf_plumes, new_ids, plume_ids, merge_ids = plumes.scan_for_plumes(
-            sdf_now,
-            sdf_previous,
-            used_ids)
+            sdf_now = sdf.variables['bt108'][:]
 
-        # Get clouds by scanning for them
-        #clouds, new_cloud_ids, cloud_ids, merge_cloud_ids = \
-        #    plumes.scan_for_plumes(clouds_now,
-        #                           clouds_previous,
-        #                           used_cloud_ids)
+            # Get plumes first by scanning for them
+            sdf_plumes, new_ids, plume_ids, merge_ids = plumes.scan_for_plumes(
+                sdf_now,
+                sdf_previous,
+                used_ids)
 
-        # Now just need a way whereby the plume objects can interact with
-        # cloud objects, e.g. check if they are near them or check if clouds
-        #  have been initiated on top of plumes, or check their propagaton
-        # relative to that of the cloud idk
-        for i in new_ids:
-            used_ids.append(i)
+            # Get clouds by scanning for them
+            #clouds, new_cloud_ids, cloud_ids, merge_cloud_ids = \
+            #    plumes.scan_for_plumes(clouds_now,
+            #                           clouds_previous,
+            #                           used_cloud_ids)
 
-        #for i in new_cloud_ids:
-        #    used_cloud_ids.append(i)
+            # Now just need a way whereby the plume objects can interact with
+            # cloud objects, e.g. check if they are near them or check if clouds
+            #  have been initiated on top of plumes, or check their propagaton
+            # relative to that of the cloud idk
+            for i in new_ids:
+                used_ids.append(i)
 
-        old_bool = np.asarray([j in ids_previous for j in plume_ids])
-        if len(old_bool) > 0:
-            old_ids = plume_ids[old_bool]
-        else:
-            old_ids = []
+            #for i in new_cloud_ids:
+            #    used_cloud_ids.append(i)
 
-        #old_cloud_bool = np.asarray([j in clouds_previous for j in cloud_ids])
-        #old_cloud_ids = cloud_ids[old_cloud_bool]
+            old_bool = np.asarray([j in ids_previous for j in plume_ids])
+            if len(old_bool) > 0:
+                old_ids = plume_ids[old_bool]
+            else:
+                old_ids = []
 
-        # Then, for each new ID, we initialise plume objects
-        for i in np.arange(0, len(new_ids)):
-            #print 'Creating new plume', new_ids[i]
-            plume = plumes.Plume(new_ids[i], datetimes[date_i])
-            plume.update_position(lats, lons, sdf_plumes, new_ids[i])
-            plume.update_duration(datetimes[date_i])
-            plume.update_bbox()
-            plume.update_majorminor_axes()
-            plume.update_area()
-            plume.update_max_extent()
-            plume.update_centroid_speed()
-            plume.update_centroid_direction()
-            #plume.update_leading_edge_4(sdf_plumes, lons, lats)
-            plume_objects[str(new_ids[i])] = plume
+            #old_cloud_bool = np.asarray([j in clouds_previous for j in cloud_ids])
+            #old_cloud_ids = cloud_ids[old_cloud_bool]
 
-        # For merged IDs, we move the tracks to pre-merge tracks
-        for i in np.arange(0, len(merge_ids)):
-            plume = plume_objects[str(merge_ids[i])]
-            plume.merge()
+            # Then, for each new ID, we initialise plume objects
+            for i in np.arange(0, len(new_ids)):
+                #print 'Creating new plume', new_ids[i]
+                plume = plumes.Plume(new_ids[i], datetimes[date_i])
+                plume.update_position(lats, lons, sdf_plumes, new_ids[i])
+                plume.update_duration(datetimes[date_i])
+                plume.update_bbox()
+                plume.update_majorminor_axes()
+                plume.update_area()
+                plume.update_max_extent()
+                plume.update_centroid_speed()
+                plume.update_centroid_direction()
+                #plume.update_leading_edge_4(sdf_plumes, lons, lats)
+                plume_objects[str(new_ids[i])] = plume
 
-        # For old IDs, we just run an update.
-        for i in np.arange(0, len(old_ids)):
-            #print 'Updating plume', old_ids[i]
-            plume = plume_objects[str(old_ids[i])]
-            plume.update_position(lats,lons, sdf_plumes, old_ids[i])
-            plume.update_duration(datetimes[date_i])
-            plume.update_bbox()
-            plume.update_majorminor_axes()
-            plume.update_area()
-            plume.update_centroid_speed()
-            plume.update_centroid_direction()
-            plume.update_max_extent()
-            #plume.update_leading_edge_4(sdf_plumes, lons, lats)
-            plume_objects[str(old_ids[i])] = plume
+            # For merged IDs, we move the tracks to pre-merge tracks
+            for i in np.arange(0, len(merge_ids)):
+                plume = plume_objects[str(merge_ids[i])]
+                plume.merge()
 
-        # Plumes which no longer exist are removed and archived
-        if len(ids_previous) == 0:
-            removed_ids = []
-        else:
-            removed_bool = np.asarray([j not in plume_ids for j in
-                                       ids_previous])
-            removed_ids = ids_previous[removed_bool]
+            # For old IDs, we just run an update.
+            for i in np.arange(0, len(old_ids)):
+                #print 'Updating plume', old_ids[i]
+                plume = plume_objects[str(old_ids[i])]
+                plume.update_position(lats,lons, sdf_plumes, old_ids[i])
+                plume.update_duration(datetimes[date_i])
+                plume.update_bbox()
+                plume.update_majorminor_axes()
+                plume.update_area()
+                plume.update_centroid_speed()
+                plume.update_centroid_direction()
+                plume.update_max_extent()
+                #plume.update_leading_edge_4(sdf_plumes, lons, lats)
+                plume_objects[str(old_ids[i])] = plume
 
-        for i in np.arange(0, len(removed_ids)):
-            #print 'Archiving plume', removed_ids[i]
-            plume = plume_objects[str(removed_ids[i])]
-            plume.update_GPE_speed()
-            plume_archive[str(removed_ids[i])] = plume
-            del plume_objects[str(removed_ids[i])]
+            # Plumes which no longer exist are removed and archived
+            if len(ids_previous) == 0:
+                removed_ids = []
+            else:
+                removed_bool = np.asarray([j not in plume_ids for j in
+                                           ids_previous])
+                removed_ids = ids_previous[removed_bool]
 
-        sdf_previous = sdf_plumes
-        ids_previous = plume_ids
+            for i in np.arange(0, len(removed_ids)):
+                #print 'Archiving plume', removed_ids[i]
+                plume = plume_objects[str(removed_ids[i])]
+                plume.update_GPE_speed()
+                plume_archive[str(removed_ids[i])] = plume
+                del plume_objects[str(removed_ids[i])]
 
-        #if runtime > datetime.timedelta(hours=0):
-        #    plotting.plot_plumes(plume_objects, sdf_plumes, lats, lons, bt,
-        #                         datetimes[date_i], datestrings[date_i])
+            sdf_previous = sdf_plumes
+            ids_previous = plume_ids
 
-    # After the script has finished, add remaining plumes to the plume archive
-    for i in plume_objects:
-        plume_archive[i] = plume_objects[i]
+            #if runtime > datetime.timedelta(hours=0):
+            #    plotting.plot_plumes(plume_objects, sdf_plumes, lats, lons, bt,
+            #                         datetimes[date_i], datestrings[date_i])
 
-    # Summary plots
-    plotting.plot_plume_count(plume_archive)
+        # After the script has finished, add remaining plumes to the plume archive
+        for i in plume_objects:
+            plume_archive[i] = plume_objects[i]
 
-    plume_objects.close()
-    plume_archive.close()
+        # Summary plots
+        plotting.plot_plume_count(plume_archive)
+
+        plume_objects.close()
+        plume_archive.close()
 
 
