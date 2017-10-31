@@ -10,9 +10,121 @@ import matplotlib.dates as mdates
 import matplotlib.cbook as cbook
 import matplotlib.cm as cm
 import os
+import pymc3 as pm
 
 import pinkdust
 import utilities
+
+def plot_plume_overviews(plume_archive, lats, lons):
+    """
+    Plots plume overview plots for each timestep used in the plume archive
+    :param plume_archive:
+    :return:
+    """
+
+    fig, ax = plt.subplots()
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    # All you need is a list of IDs active for each datetime
+    date_dictionary = {}
+
+    for i in plume_archive:
+        dates_observed = plume_archive[i].dates_observed
+        for j in dates_observed:
+            if j in date_dictionary:
+                date_dictionary[j].append(i)
+            else:
+                date_dictionary[j] = []
+                date_dictionary[j].append(i)
+
+    total_dates = len(plume_archive)
+    plots_done = 0
+
+    # Then make one plot per date
+    for i in date_dictionary:
+        print '\n\nProgress:', str((float(plots_done)/float(
+            total_dates))*100)+'%\n\n'
+        plume_data = np.zeros((lats.shape[0], lons.shape[1]))
+        plume_data[:] = np.nan
+        centroid_lats = []
+        centroid_lons = []
+        plume_ids = []
+
+        active_plumes = date_dictionary[i]
+
+        for j in active_plumes:
+
+            dates_observed = plume_archive[j].dates_observed
+            date_bool = np.asarray(dates_observed) == i
+
+            if i.hour == 9 and i.minute == 30:
+                print plume_archive[j].plume_id
+                print plume_archive[j].dates_observed
+
+            plume_bools = np.asarray(plume_archive[j].track_plume_bool)
+
+            plume_bool = plume_bools[date_bool]
+
+            plume_bool = plume_bool[0].toarray()
+
+            if plume_archive[j].clear_LLJ:
+                plume_data[plume_bool] = 2
+            else:
+                plume_data[plume_bool] = 1
+
+            track_centroid_lats = plume_archive[j].track_centroid_lat
+            track_centroid_lons = plume_archive[j].track_centroid_lon
+            pre_merge_centroid_lats = plume_archive[
+                j].pre_merge_track_centroid_lat
+            pre_merge_centroid_lons = plume_archive[
+                j].pre_merge_track_centroid_lon
+
+            if plume_archive[j].merged == False:
+                centroid_lat = np.asarray(track_centroid_lats)[date_bool][0]
+                centroid_lon = np.asarray(track_centroid_lons)[date_bool][0]
+            else:
+                combined_track_lat = np.append(pre_merge_centroid_lats,
+                                               track_centroid_lats)
+                combined_track_lon = np.append(pre_merge_centroid_lons,
+                                               track_centroid_lons)
+                centroid_lat = np.asarray(combined_track_lat)[date_bool][0]
+                centroid_lon = np.asarray(combined_track_lon)[date_bool][0]
+
+            centroid_lats.append(centroid_lat)
+            centroid_lons.append(centroid_lon)
+            plume_ids.append(plume_archive[j].plume_id)
+
+        centroid_x, centroid_y = m(centroid_lons, centroid_lats)
+
+        levels = [1, 2]
+
+        contourplot = m.contourf(lons, lats, plume_data, levels, colors=(
+            'r', 'g'))
+        centroidplot = m.scatter(centroid_x, centroid_y, s=1)
+
+        anns = []
+
+        for label_i, txt in enumerate(plume_ids):
+            ann = ax.annotate(txt, (centroid_x[label_i], centroid_y[
+                label_i]), fontsize=8)
+            anns.append(ann)
+
+        plt.savefig('Plume_overview_'+i.strftime("%Y%m%d%H%M")+'.png')
+
+        centroidplot.remove()
+        for coll in contourplot.collections:
+            coll.remove()
+
+        for ann in anns:
+            ann.remove()
+
+        plots_done += 1
 
 def plot_plumes(plume_objects, sdf_plumes, lats, lons, bt, datetime, \
                                           datestring):
@@ -35,7 +147,7 @@ def plot_plumes(plume_objects, sdf_plumes, lats, lons, bt, datetime, \
     m.drawcountries(linewidth=0.5)
 
     """
-    data_array = np.zeros((lons.shape[0], lats.shape[1], 3))Wutzu984
+    data_array = np.zeros((lons.shape[0], lats.shape[1], 3))
 
 
     data_array[:, :, 0] = bt.variables['bt087'][:]
@@ -562,9 +674,9 @@ def plot_emission_speed_map_2(plume_archive, lats, lons, min_lat=None,
     lons, lats = np.meshgrid(lons, lats)
 
     # Get your zip grid of latlon coordinates
-    latlon_zip = np.array(zip(lats.ravel(), lons.ravel()), dtype=('f8,'
-                                                                  'f8')).reshape(
-        lats.shape)
+    latlon_zip = np.array(zip(lats.ravel(), lons.ravel()),
+                          dtype=('f8,'
+                                 'f8')).reshape(lats.shape)
 
     latlon_zip = latlon_zip.flatten()
 
@@ -880,8 +992,26 @@ def plot_plume_tracks(plume_archive, lats, lons, min_lat=None,
 
     plt.close()
 
-    # Assign it to that index in the empty data array of nans, and Bob's
-    # your uncle
+def plot_traces(traces, retain=1000):
+    """
+    Convenience function:
+    Plot traces with overlaid means and values
+    """
+
+    ax = pm.traceplot(traces[-retain:],
+                      figsize=(12, len(traces.varnames) * 1.5),
+                      lines={k: v['mean'] for k, v in
+                             pm.df_summary(traces[-retain:]).
+                      iterrows()})
+
+    for i, mn in enumerate(pm.df_summary(traces[-retain:])['mean']):
+        ax[i, 0].annotate('{:.2f}'.format(mn), xy=(mn, 0), xycoords='data'
+                          , xytext=(5, 10), textcoords='offset points',
+                          rotation=90
+                          , va='bottom', fontsize='large', color='#AA0022')
+
+# Assign it to that index in the empty data array of nans, and Bob's
+# your uncle
 
 
 

@@ -12,9 +12,9 @@ if __name__ == '__main__':
     # obtain SDF values
     year_lower = 2012
     year_upper = 2012
-    month_lower = 7
-    month_upper = 7
-    day_lower = 1
+    month_lower = 6
+    month_upper = 6
+    day_lower = 10
     day_upper = 30
     hour_lower = 0
     hour_upper = 23
@@ -77,6 +77,9 @@ if __name__ == '__main__':
     lons = np.ma.array(lons, mask=lonmask)
     lats = np.ma.array(lats, mask=latmask)
 
+    moving_window_cs = np.zeros((96, datetimes.shape[0], lats.shape[0],
+                                 lons.shape[1]))
+
     cloudscreenedbt_15day = np.zeros((datetimes.shape[0], 3,
                                       lats.shape[0],
                                       lons.shape[1]))
@@ -94,7 +97,7 @@ if __name__ == '__main__':
     test3 = datetime.datetime.now()
     # Generate cloud masked BTs for each day, including +- 7 days on the ends
     # k is initiated here at -1 so it'll go to 0 on the first round of the
-    # for loop
+    # for loop (what a silly way to do an iterator)
     k = -1
     for i in datetimes:
         k += 1
@@ -113,6 +116,7 @@ if __name__ == '__main__':
         except:
             print 'Found no BT data for ' + filename
             continue
+
         cloudfilename = '/ouce-home/data/satellite/meteosat/seviri/15-min/' \
                    'native/cloudmask/nc' \
                    '/' + str(i.strftime(

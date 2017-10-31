@@ -11,6 +11,7 @@ import utilities
 import plumes
 import pinkdust
 import plotting
+import get_llj_prob_model
 
 if __name__ == '__main__':
     #### NOTES ####
@@ -33,16 +34,29 @@ if __name__ == '__main__':
     # return a whole pile of IDs. Those in turn can go to the convection
     # object generator.
 
-    run = False
+    # Generate the Bayesian multivariate logistic model and sample the
+    # parameter space to get a (burned) trace
+
+    run = True
+    run_mcmc = True
+
+    if run_mcmc:
+        data = get_llj_prob_model.create_plume_dataframe('LLJ_manual_ID.csv',
+                                                         'plume_archive_LLJ')
+
+        trace = get_llj_prob_model.logistic_llj_model(data, 'LLJ',
+                                                      'conv_distance',
+                                                      'time_to_09',
+                                                      'duration')
 
     year_lower = 2012
     year_upper = 2012
     month_lower = 6
     month_upper = 6
     day_lower = 1
-    day_upper = 30
-    hour_lower = 0
-    hour_upper = 23
+    day_upper = 1
+    hour_lower = 8
+    hour_upper = 10
     minute_lower = 0
     minute_upper = 45
 
@@ -78,6 +92,9 @@ if __name__ == '__main__':
     used_colour_IDs = {}
     plume_objects = []
 
+    # Restrict the lons and lats to the CWS alone
+    lonbool = np.asarray([j >= -20 and j <= 10 for j in lons[0]])
+
     if run:
 
         plume_objects = shelve.open('plume_objects')
@@ -86,20 +103,30 @@ if __name__ == '__main__':
         convection_objects = shelve.open('convection_objects')
         convection_objects.clear()
 
-        plume_archive = shelve.open('plume_archive')
+        plume_archive = shelve.open('plume_archive_prob')
 
         for date_i in np.arange(0, len(datestrings)):
             runtime = datetimes[date_i] - datetimes[0]
             print '\n' + datestrings[date_i] + '\n'
             totaltest = datetime.datetime.now()
             sdf = Dataset(
-                '/ouce-home/data/satellite/meteosat/seviri/15-min/native/sdf/nc/'
-                'JUNE2012/SDF_v2/SDF_v2.' + datestrings[date_i] + '.nc')
+                '/ouce-home/data/satellite/meteosat/seviri/15-min/native/sdf'
+                '/nc/'+
+                datetimes[date_i].strftime("%B").upper(
+                )+str(datetimes[date_i].year)+'/SDF_v2/SDF_v2.' + \
+                datestrings[date_i] + '.nc')
             bt = Dataset(
-                '/ouce-home/data/satellite/meteosat/seviri/15-min/native/bt/nc/'
-                'JUNE2012/H-000-MSG2__-MSG2________-'
-                'IR_BrightnessTemperatures___-000005___-' + datestrings[date_i] +
+                '/ouce-home/data/satellite/meteosat/seviri/15-min/native/bt'
+                '/nc/'
+                +
+                datetimes[date_i].strftime("%B").upper(
+                )+str(datetimes[date_i].year)+'/H-000-MSG2__-MSG2________-'
+                'IR_BrightnessTemperatures___-000005___-'
+                + datestrings[date_i] +
                 '-__.nc')
+
+            # Restrict the above to the same lons and lats as used for the
+            # coordinates
 
             #clouds_now = np.load('/ouce-home/students/hert4173/'
             #                        'cloud_mask_numpy_files/cloudmask'
@@ -109,11 +136,19 @@ if __name__ == '__main__':
 
             sdf_now = sdf.variables['bt108'][:]
 
+            bt_108 = bt.variables['bt108'][:]
+            clouds = bt_108 < 270
+
             # Get plumes first by scanning for them
             sdf_plumes, new_ids, plume_ids, merge_ids = plumes.scan_for_plumes(
                 sdf_now,
                 sdf_previous,
-                used_ids)
+                used_ids,
+                clouds)
+
+            # We could here do infilling, then at least you'll have it for
+            # the next iteration. But if you've labelled them already you
+            # don't have a binary.
 
             # Get clouds by scanning for them
             #clouds, new_cloud_ids, cloud_ids, merge_cloud_ids = \
@@ -121,10 +156,6 @@ if __name__ == '__main__':
             #                           clouds_previous,
             #                           used_cloud_ids)
 
-            # Now just need a way whereby the plume objects can interact with
-            # cloud objects, e.g. check if they are near them or check if clouds
-            #  have been initiated on top of plumes, or check their propagaton
-            # relative to that of the cloud idk
             for i in new_ids:
                 used_ids.append(i)
 
@@ -137,7 +168,8 @@ if __name__ == '__main__':
             else:
                 old_ids = []
 
-            #old_cloud_bool = np.asarray([j in clouds_previous for j in cloud_ids])
+            #old_cloud_bool = np.asarray([j in clouds_previous for
+            # j in cloud_ids])
             #old_cloud_ids = cloud_ids[old_cloud_bool]
 
             # Then, for each new ID, we initialise plume objects
@@ -152,6 +184,8 @@ if __name__ == '__main__':
                 plume.update_max_extent()
                 plume.update_centroid_speed()
                 plume.update_centroid_direction()
+                plume.check_conv_distance(lats, lons, clouds)
+                plume.update_most_likely_source()
                 #plume.update_leading_edge_4(sdf_plumes, lons, lats)
                 plume_objects[str(new_ids[i])] = plume
 
@@ -187,6 +221,8 @@ if __name__ == '__main__':
                 #print 'Archiving plume', removed_ids[i]
                 plume = plume_objects[str(removed_ids[i])]
                 plume.update_GPE_speed()
+                #plume.update_mechanism_likelihood()
+                plume.update_llj_probability(trace)
                 plume_archive[str(removed_ids[i])] = plume
                 del plume_objects[str(removed_ids[i])]
 
@@ -200,9 +236,6 @@ if __name__ == '__main__':
         # After the script has finished, add remaining plumes to the plume archive
         for i in plume_objects:
             plume_archive[i] = plume_objects[i]
-
-        # Summary plots
-        plotting.plot_plume_count(plume_archive)
 
         plume_objects.close()
         plume_archive.close()

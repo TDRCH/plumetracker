@@ -12,6 +12,7 @@ from netCDF4 import Dataset
 from netCDF4 import date2num
 from mpl_toolkits.basemap import Basemap
 import os
+import tables
 
 import pinkdust
 import utilities
@@ -57,7 +58,6 @@ def extract_15day_mean(cloudscreenedbt_15day):
     cloudscreenedbt_15daymean_108_87 = np.nanmean(BT_108_87, axis=0)
     return cloudscreenedbt_15daymean_108_87
 
-
 def generate_dust_mask(noncloudscreenedarray, cloudscreenedarray,
                        mean_15day_108_87):
     """
@@ -80,7 +80,7 @@ def generate_dust_mask(noncloudscreenedarray, cloudscreenedarray,
     BT_array[:, :, 2] = BT_120
 
     rgb_array = pinkdust.generate_image_from_array(BT_array)
-
+    """
     extent = (-26, 44, 1, 43)
     m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
                 llcrnrlat=extent[2], urcrnrlat=extent[3],
@@ -91,7 +91,7 @@ def generate_dust_mask(noncloudscreenedarray, cloudscreenedarray,
     plt.savefig('/ouce-home/students/hert4173/SEVIRI_imagery/'
                 'SDF_test_pinkdust.png',
                 dpi=200)
-
+    """
     BT_108_screened = cloudscreenedarray[0, 1]
     BT_87_screened = cloudscreenedarray[0, 0]
 
@@ -171,6 +171,7 @@ def generate_SDF(dust_mask_108, dust_mask_108_87, dust_mask_120_108,
     # plt.savefig('dust_mask_sum.png')
     SDF = 1 * (dust_mask_sum >= 4)
 
+    """
     # Write an output nc file with an SDF variable
 
     # File description and dimensions
@@ -193,5 +194,6 @@ def generate_SDF(dust_mask_108, dust_mask_108_87, dust_mask_120_108,
     times[:] = date2num(datetime, units=times.units, calendar=times.calendar)
     SDFvar[:] = SDF
     SDFfile.close()
+    """
 
     return SDF

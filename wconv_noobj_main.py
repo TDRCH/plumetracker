@@ -37,7 +37,7 @@ if __name__ == '__main__':
     month_upper = 6
     day_lower = 1
     day_upper = 30
-    hour_lower = 0
+    hour_lower = 8
     hour_upper = 23
     minute_lower = 0
     minute_upper = 45

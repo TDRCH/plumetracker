@@ -6,22 +6,25 @@ mechanism type
 import numpy as np
 from scipy.ndimage import measurements
 from scipy import ndimage as ndi
-from skimage.measure import label, regionprops
 from skimage import feature
 import datetime
-import random
 from copy import deepcopy
 from shapely.geometry import shape
-from shapely.ops import transform
 import pyproj
 import shapely.ops as ops
 from shapely.geometry.polygon import Polygon
 from functools import partial
+import scipy.signal
+from scipy import spatial
+from scipy import sparse
+import cv2
+import matplotlib.pyplot as plt
+import datetime as dt
 
 import utilities
 
 # Global function to scan the SDFs for unique plumes
-def scan_for_plumes(sdf_now, sdf_prev, used_ids):
+def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
     """
     Scans a set of SDFs for plumes and labels them
     :param SDF_now:
@@ -39,6 +42,9 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
         mask_sizes[0] = 0
         sdf_now = mask_sizes[label_objects]
 
+        # Plume infilling is here - switch off for now
+        #sdf_now, infilled = plume_infilling(sdf_now, clouds)
+
         sdf_clusters, num = measurements.label(sdf_now)
         plume_ids = np.unique(sdf_clusters)
         large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
@@ -52,6 +58,9 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
         mask_sizes = sizes > 250
         mask_sizes[0] = 0
         sdf_now = mask_sizes[label_objects]
+
+        # Plume infilling is here - switch off for now
+        #sdf_now, infilled = plume_infilling(sdf_now, clouds)
 
         sdf_clusters, num = measurements.label(sdf_now)
         plume_ids = np.unique(sdf_clusters)
@@ -107,6 +116,42 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids):
 
     return sdf_clusters, new_ids, large_plume_ids, merge_ids
 
+def plume_infilling(sdf_now, clouds):
+    """
+    Fills in small areas of dust surrounding convection. These plumes are
+    assigned a lower confidence. But then how would we maintain the
+    identification of what's been infilled...So maybe this should be done
+    at the end of the plume scanning phase, or just simply afterwards in a
+    separate function called by main? But what about merging. We need to run a
+    comparison with and without this infilling. Also wouldn't this make sense
+    as something which only runs if the plume is close to convection in the
+    first place?
+    :param sdf_now:
+    :param clouds:
+    :return:
+    """
+
+    sdf_copy = sdf_now.astype(np.uint8).copy()
+    plt.close()
+    plt.contourf(sdf_copy)
+    plt.savefig('sdf_copy.png')
+    plt.close()
+    #sdf_copy[sdf_copy!=0] = 255
+    # Get a version of the SDF with no holes in it
+    holes = cv2.floodFill(sdf_copy, None, (0, 0), 1)
+    holes = ~holes[1]
+    hole_conv_colocation = (clouds.astype(np.uint8) & holes)
+    plt.close()
+    plt.contourf(hole_conv_colocation)
+    plt.savefig('hole_conv_colocation.png')
+    plt.close()
+    sdf_infilled = sdf_now + hole_conv_colocation
+    plt.contourf(sdf_infilled)
+    plt.savefig('sdf_copy_filled.png')
+    plt.close()
+
+    return sdf_infilled, hole_conv_colocation
+
 class Plume:
 
     def __init__(self, plume_id, emission_time):
@@ -118,15 +163,19 @@ class Plume:
         # The previous two timesteps are recorded
         self.track_lons = []
         self.track_lats = []
+        self.track_plume_bool = []
         self.track_edges_lat = []
         self.track_edges_lon = []
         self.dates_observed = []
         self.track_area = []
         self.track_centroid_direction = []
+        self.track_primary_axis_direction = []
         self.leading_edge_lon = None
         self.leading_edge_lat = None
         self.merged = False
+        self.clear_LLJ = False
         self.track_speed_centroid = []
+        self.in_filled = False
         self.pre_merge_track_lons = []
         self.pre_merge_track_lats = []
         self.pre_merge_track_centroid_lat = []
@@ -135,6 +184,7 @@ class Plume:
         self.pre_merge_track_speed_centroid = []
         self.pre_merge_dates_observed = []
         self.pre_merge_track_direction = []
+        self.LLJ_prob = None
 
     # So, at every timestep you have a whole load of SDFs
     # Then, when a new pixel becomes 1, an instance of this class is called
@@ -154,6 +204,11 @@ class Plume:
         """
 
         plume_bool = sdf_plumes == plume_id
+
+        # Convert the plume bool to a sparse matrix for storage
+        sparse_plume_bool = sparse.csr_matrix(plume_bool)
+        self.plume_bool = sparse_plume_bool
+        self.track_plume_bool.append(self.plume_bool)
 
         plume_lons = lons[plume_bool]
         plume_lats = lats[plume_bool]
@@ -327,11 +382,27 @@ class Plume:
         sort_indices = np.argsort(evals)[::-1]
         evec1, evec2 = evecs[:, sort_indices]
 
+        scale = 20
+
         # Add the mean back in
-        self.lon_major = evec1[0]+np.mean(self.plume_lons)
-        self.lat_major = evec1[1]+np.mean(self.plume_lats)
-        self.lon_minor = evec2[0]+np.mean(self.plume_lons)
-        self.lat_minor = evec2[1]+np.mean(self.plume_lats)
+        self.lon_major = evec1[0]*-scale*2+np.nanmean(self.plume_lons)
+        self.lat_major = evec1[1]*-scale*2+np.nanmean(self.plume_lats)
+        self.lon_minor = evec2[0]*-scale+np.nanmean(self.plume_lons)
+        self.lat_minor = evec2[1]*-scale+np.nanmean(self.plume_lats)
+
+        self.lon_major_2 = evec1[0]*scale*2+np.nanmean(self.plume_lons)
+        self.lat_major_2 = evec1[1]*scale*2+np.nanmean(self.plume_lons)
+        self.lon_minor_2 = evec2[0]*scale+ np.nanmean(self.plume_lons)
+        self.lat_minor_2 = evec2[1]*scale+ np.nanmean(self.plume_lons)
+
+        self.primary_axis_direction = utilities.\
+                calculate_initial_compass_bearing(
+            (self.lat_major,
+             self.lon_major),
+            (self.lat_major_2,
+             self.lon_major_2))
+
+        self.track_primary_axis_direction.append(self.primary_axis_direction)
 
     def update_duration(self, date):
         """
@@ -480,31 +551,417 @@ class Plume:
 
             self.track_centroid_direction.append(self.centroid_direction)
 
-    def check_conv_association(self, clouds):
+    def check_conv_distance(self, lats, lons, clouds):
         """
-        Checks whether the plume is located in proximity to the cloud mask
+        Checks how far the plume is from a deep convection cloud.
+        This should be done at the beginning of the plume life cycle to
+        assess its association with deep convection.
         :param clouds:
         :return:
         """
 
+        # Get clouds from the BT field rather than the cloud mask - then we
+        # can also use the BT field to get the 'pinkness' value of the plume
 
+        edge_cloud_bool = feature.canny(clouds, sigma=0.2)
+        cloud_lats = lats[edge_cloud_bool == 1]
+        cloud_lons = lons[edge_cloud_bool == 1]
+        centroid_lat = self.centroid_lat
+        centroid_lon = self.centroid_lon
+        cloud_latlons_array = np.dstack((cloud_lats, cloud_lons))[0]
 
-    def move(self):
-        pass
+        distance, index = spatial.cKDTree(cloud_latlons_array).query([
+            centroid_lat, centroid_lon])
 
+        nearest_coord = cloud_latlons_array[index]
+        self.conv_distance = utilities.haversine(centroid_lon, centroid_lat,
+                                       nearest_coord[1], nearest_coord[0])
 
-    def update_axes(self):
-        pass
+    def check_conv_distance_2(self, sdf_plumes, lats, lons, clouds):
+        """
+        Checks how far the plume is from a deep convection cloud.
+        This should be done at the beginning of the plume life cycle to
+        assess its association with deep convection.
+        Attempt #2: I draw a buffer around the plume, iteratively increasing it
+        :param self:
+        :param sdf_plumes:
+        :param lats:
+        :param lons:
+        :param clouds:
+        :return:
+        """
+
+        found_convection = False
+        buffered_plume = sdf_plumes == self.plume_id
+
+        while found_convection == False:
+            # Create a 2-deep buffer around the plume
+            print 'here'
+            convolution = scipy.signal.convolve2d(buffered_plume, np.ones((10,
+                                                                         10)),
+                                                  mode='same')
+            check_grid = convolution > 0
+            print 'here 1'
+            # Get only the edges of the clouds
+            edge_cloud_bool = feature.canny(clouds, sigma=0.2)
+            cloud_lats = lats[edge_cloud_bool == 1]
+            cloud_lons = lons[edge_cloud_bool == 1]
+            cloud_latlons_array = np.dstack((cloud_lats, cloud_lons))[0]
+            print 'here 2'
+            # Check if any cloud lats/lons are within the buffer
+            check_lats = lats[check_grid]
+            check_lons = lons[check_grid]
+            check_edge_cloud_bool = edge_cloud_bool[check_grid]
+            check_edge_cloud_lats = check_lats[check_edge_cloud_bool]
+            check_edge_cloud_lons = check_lons[check_edge_cloud_bool]
+            print 'here 3'
+            # If cloud has been found, stop the search
+            if len(check_edge_cloud_lats) > 0:
+                found_convection = True
+            print 'here 4'
+            # Otherwise we build a larger buffer
+            buffered_plume = convolution
+
+        smallest_distance = \
+            np.min([utilities.haversine(self.centroid_lon,
+                                        self.centroid_lat,
+                                        check_edge_cloud_lons[j],
+                                        check_edge_cloud_lats[j])
+                    for j in np.arange(0, len(check_edge_cloud_lons))])
+
+        print smallest_distance
+
+    def update_most_likely_source(self):
+        """
+        Identifies the source to which the plume was nearest at the point of
+        emission. Uses sources defined by AW13. Only assigns sources to
+        plumes within the CWS region. Plumes with a source not within 50km
+        of a source are not assigned any most likely source. Note: a better
+        approach to this would be to assign box regions for each source.
+        :return:
+        """
+
+        # Hard coded emission sources taken from AW13
+        source_dict = {'A': (26, -6.5), 'B': (30, -6), 'C': (23, -5),
+                       'D': (24.5, -5), 'E': (21, 1.75), 'F': (34, 0),
+                       'G': (20, 0.5), 'H': (21.5, 1), 'I': (26.5, 1.5),
+                       'J': (22.5, 2), 'K': (24, 3), 'L': (19.5, 3),
+                       'M': (21, 3), 'N': (20, 5), 'O': (20, 7.5)}
+
+        CWS_min_lat = 15
+        CWS_max_lat = 35
+        CWS_min_lon = -17
+        CWS_max_lon = 15
+
+        if self.merged == True:
+            source_lat = self.pre_merge_track_centroid_lat[0]
+            source_lon = self.pre_merge_track_centroid_lon[0]
+        else:
+            source_lat = self.track_centroid_lat[0]
+            source_lon = self.track_centroid_lon[0]
+
+        # Find the distance of the detected source to known source regions
+        source_distances = np.asarray([utilities.haversine(source_lon,
+                                                           source_lat,
+                                                           source_dict[j][1],
+                                                           source_dict[j][0])
+                                       for
+                                       j in source_dict])
+
+        dict_indices = np.asarray([j for j in source_dict])
+
+        if np.min(source_distances) > 50:
+            self.most_likely_source = None
+        else:
+            smallest_distance = source_distances == np.min(source_distances)
+            self.most_likely_source = dict_indices[smallest_distance][0]
+            print self.most_likely_source
 
     def update_mechanism_likelihood(self):
-        pass
+        ## Criteria: ##
+        # Emission time
+        # Distance from deep convection
+        # Shape of the plume
+        # Depth and duration of nearby convection
+        # ERAI 6-hourly fields
+        # Proximity to an identified CPO event
+        # Size of the final plume (note this risks skewing results)
 
+        total_criteria = 3
+        criteria_fulfilled = 0
+
+        if self.dates_observed[0].hour >= 9 and self.dates_observed[0].hour \
+                <= 12:
+            criteria_fulfilled += 1
+
+        if self.conv_distance > 100:
+            criteria_fulfilled += 1
+
+        mean_direction = np.nanmean(self.track_centroid_direction)
+        mean_primary_axis_direction = np.nanmean(
+            self.track_primary_axis_direction)
+        if abs(mean_direction-mean_primary_axis_direction < 20):
+            criteria_fulfilled += 1
+
+        if criteria_fulfilled == 3:
+            print 'Likely an LLJ:', self.plume_id
+            print self.track_centroid_lat
+            print self.track_centroid_lon
+            self.clear_LLJ = True
+        else:
+            self.clear_LLJ = False
+
+    def update_plume_confidence(self):
+        """
+        Tests whether the plume has been affected by deep convection,
+        proximity to the plume size detection threshold, exceedance of the
+        BT threshold, merging with other plumes, splitting
+        :return:
+        """
 
     # Ok so there could be a method to update various parameters
     # Then call these each time an object instance is created
 
     # Ok so if you make an __init__(self) function, python will run it every
     #  time the class is invoked.
+
+    def update_llj_probability(self, trace):
+        """
+        Updates the probability of being an LLJ based off a pre-existing
+        empirical multivariate logistic regression model which links
+        predictor variables to the probability of a plume being an LLJ. The
+        MCMC method to sample the parameter landscape could be run once
+        every time plumetracker is run (not that that's necessary, since the
+        training dataset is not going to change from month to month). This
+        update function should only be run at the end of a plume's lifecycle
+        so we can retrospectively update its LLJ probability
+
+        NOTE: It would be good to also include the Bayesian aspect of this,
+        which is that we have a distribution of probabilities from the
+        sampled parameter space - in some regions this landscape may be
+        undersampled so our probability may be very uncertain
+
+        #NOTE2: You need to read up on what to actually do with the prior,
+        amigo! Just using whatever the default is is not really good enough,
+        and hardly Bayesian!
+        :return:
+        """
+
+        emission_time = self.dates_observed[0]
+
+        # Take the smallest time to the nearest 0900UTC
+        nine = emission_time.replace(hour=9, minute=0, second=0)
+        nine_1 = nine + dt.timedelta(days=1)
+        distance_nine = abs(emission_time - nine)
+        distance_nine_1 = abs(nine_1 - emission_time)
+        distance_from_09 = np.min([distance_nine.total_seconds(),
+                                   distance_nine_1.total_seconds()])
+
+        # The probability is calculated as the mean of the distribution of
+        # probabilities from our logistic function
+        self.LLJ_prob = np.nanmean(1 / (1 + np.exp(-(trace['Intercept'] +
+                                            trace['conv_distance'] *
+                                            self.conv_distance +
+                                            trace['time_to_09'] *
+                                            distance_from_09 +
+                                            trace['duration'] *
+                                            self.duration.total_seconds()))))
+
+        print self.LLJ_prob
+
+    def convection_infilling(self, lats, lons, clouds):
+        """
+        Fills in small gaps in plumes from spots of convection, saving coords
+        which have been infilled. Only run when plume is in close proximity
+        to convection. Updates the plume's positional variables.
+        :return:
+        """
+
+        lat_min_bool = lats >= self.bbox_bottomlat
+        lat_max_bool = lats <= self.bbox_toplat
+        lon_min_bool = lons >= self.bbox_leftlon
+        lon_max_bool = lons <= self.bbox_rightlon
+        plume_bbox_bool = (lat_min_bool & lat_max_bool & lon_min_bool &
+                           lon_max_bool)
+
+        # So now you have your boolean, loop through that, and test each
+        # point for a cloud True - easy
+        cloud_box_all = np.where(plume_bbox_bool, clouds, False)
+        mask = cloud_box_all == 0
+        rows = np.flatnonzero((~mask).sum(axis=1))
+        cols = np.flatnonzero((~mask).sum(axis=0))
+        cloud_box = cloud_box_all[rows.min():rows.max()+1, cols.min(
+        ):cols.max()+1]
+
+        # Need here to initialise an array of the right size
+        # Count the number of True elements along a row
+
+        sdf_plumes = self.plume_bool.toarray()
+
+        tpb = sdf_plumes[plume_bbox_bool]
+        print tpb.shape
+
+        # So that's a boolean of the plume itself, with a whole pile of both
+        #  Trues and Falses therein
+
+        # The below is a selection of sdf plumes using the plume bbox bool,
+        # leaving zeros elsewhere, so a big array of mostly zeros, leaving
+        # sdf plumes, which has zeros in it too...
+
+        # Temporarily assign zero values in sdf_plumes to 2 so we can use
+        # the method below - need to do the same for the cloud box
+
+        sdf_plumes[sdf_plumes == 0] = 2
+
+        plume_box_all = np.where(plume_bbox_bool, sdf_plumes, 0)
+        mask = plume_box_all == 0
+        rows = np.flatnonzero((~mask).sum(axis=1))
+        cols = np.flatnonzero((~mask).sum(axis=0))
+        plume_box = plume_box_all[rows.min():rows.max() + 1, cols.min(
+        ):cols.max() + 1]
+
+        print plume_box.shape[0]*plume_box.shape[1]
+
+        # Need to reshape these arrays so they're 2D squares rather than 1D
+
+        if np.any(cloud_box):
+            for idx, val in np.ndenumerate(cloud_box):
+                if val == True:
+                    # Get indices adjacent to this cloud point
+                    neighbours = utilities.get_neighbours(idx,
+                                                         shape=cloud_box.shape)
+                    total_neighbours = len(neighbours)
+
+                    # Count the amount of neighbouring coordinates which have
+                    # dust
+                    adjacent_dust = 0
+                    for j in neighbours:
+                        if plume_box[j[0], j[1]] == True:
+                            adjacent_dust += 1
+
+                    # Determine the percentage of adjacent coordinates which
+                    # are
+                    # dusty
+                    adjacent_dust_percentage = adjacent_dust/total_neighbours
+
+                    # If enough adjacent dust exists, fill in this point as an
+                    # SDF
+                    if adjacent_dust_percentage > 0.8:
+                        plume_box[idx] = True
+
+            # Can't we just reverse the thing where we cut down the array,
+            # since sdf plumes isn't going to have anything in it except
+            # plume box
+
+
+            sdf_plumes[plume_bbox_bool] = plume_box.flatten()
+            selection_bool = deepcopy(sdf_plumes)
+
+            sdf_plumes = sdf_plumes.astype(int)
+
+            sdf_plumes[selection_bool] = self.plume_id
+
+            self.in_filled = True
+            print 'Did infilling'
+
+            # Update the plume's position using the newly calculated SDF plumes
+            self.update_position(lats, lons, sdf_plumes, self.plume_id)
+
+    def convection_infilling_2(self, lats, lons, clouds):
+        """
+        Fills in small gaps in plumes from spots of convection, saving coords
+        which have been infilled. Only run when plume is in close proximity
+        to convection. Updates the plume's positional variables.
+        :return:
+        """
+
+        lat_min_bool = lats >= self.bbox_bottomlat
+        lat_max_bool = lats <= self.bbox_toplat
+        lon_min_bool = lons >= self.bbox_leftlon
+        lon_max_bool = lons <= self.bbox_rightlon
+        plume_bbox_bool = (lat_min_bool & lat_max_bool & lon_min_bool &
+                           lon_max_bool)
+
+        # So now you have your boolean, loop through that, and test each
+        # point for a cloud True - easy
+        cloud_box_all = (clouds & plume_bbox_bool)
+        cloud_box_indices = np.indices(cloud_box_all.shape)
+        cloud_box_indices = np.dstack((cloud_box_indices[0],
+                                       cloud_box_indices[1]))
+        cloud_box_indices_plume = cloud_box_indices[plume_bbox_bool]
+
+        if True in cloud_box_all:
+
+            sdf_plumes = self.plume_bool.toarray()
+
+            for i in cloud_box_indices_plume:
+                cloudval = cloud_box_all[i[0], i[1]]
+                if cloudval == True:
+                    # Get indices adjacent to this cloud point
+                    # So this is actually slightly more complex, because you
+                    #  want the neighbours of the whole cloud, not just one
+                    # point
+                    # So if one of the point's neighbours is also cloud,
+                    # it needs to add it to a list of that cloud's points.
+                    # Then, at the end, it needs to compare the number of
+                    # adjacent dust plume points found with the number of
+                    # edge cloud points found. OK so it needs to keep adding
+                    #  edge points. Or we use canny and get the edge cloud out.
+
+                    # So say you get the edge cloud out with canny. You are
+                    # looping through all cloud points. You find one,
+                    # then you get its neighbours. You go through the
+                    # neighbours and find which one are cloud to get the
+                    # total...but then we're stuck when it comes to little
+                    # jutting out clouds surrounded by dust, no?
+
+                    # So say you've got a wee baby cloud, which is a few
+                    # dozen pixels. Test any point in that cloud and it
+                    # won't have more than 2 or 3 adjacent dust points.
+
+                    # Now say you got the centroid of that cloud
+
+                    # What if you found holes in the
+
+                    neighbours = utilities.get_neighbours(i,
+                                                shape=cloud_box_all.shape)
+                    total_neighbours = len(neighbours)
+
+                    # Count the amount of neighbouring coordinates which have
+                    # dust
+                    adjacent_dust = 0
+                    for j in neighbours:
+                        if sdf_plumes[j[0], j[1]]:
+                            print 'Found dust'
+                            adjacent_dust += 1
+
+                    # Determine the percentage of adjacent coordinates which
+                    # are dusty
+                    adjacent_dust_percentage = float(adjacent_dust) / \
+                                               float(total_neighbours)
+
+                    if adjacent_dust_percentage != 0:
+                        print adjacent_dust_percentage
+
+                    # If enough adjacent dust exists, fill in this point as an
+                    # SDF
+                    if adjacent_dust_percentage > 0.8:
+                        sdf_plumes[i[0], i[1]] = True
+
+            # Can't we just reverse the thing where we cut down the array,
+            # since sdf plumes isn't going to have anything in it except
+            # plume box
+
+            selection_bool = deepcopy(sdf_plumes)
+            sdf_plumes = sdf_plumes.astype(int)
+            sdf_plumes[selection_bool] = self.plume_id
+
+            self.in_filled = True
+            print 'Did infilling'
+
+            # Update the plume's position using the newly calculated SDF plumes
+            self.update_position(lats, lons, sdf_plumes, self.plume_id)
+
 
 class Convection:
 
@@ -586,9 +1043,6 @@ class Convection:
         """
 
     def move(self):
-        pass
-
-    def merge(self):
         pass
 
     def update_axes(self):
