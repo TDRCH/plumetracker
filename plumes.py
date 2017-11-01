@@ -502,26 +502,27 @@ class Plume:
         :return:
         """
 
-        self.merged = True
-        self.merge_date = self.dates_observed[-1]
+        if len(self.dates_observed) > 0:
+            self.merged = True
+            self.merge_date = self.dates_observed[-1]
 
-        self.pre_merge_track_lons = self.track_lons
-        self.pre_merge_track_lats = self.track_lats
-        self.pre_merge_track_centroid_lat = self.track_centroid_lat
-        self.pre_merge_track_centroid_lon = self.track_centroid_lon
-        self.pre_merge_track_area = self.track_area
-        self.pre_merge_track_speed_centroid = self.track_speed_centroid
-        self.pre_merge_dates_observed = self.dates_observed
-        self.pre_merge_track_centroid_direction = self.track_centroid_direction
+            self.pre_merge_track_lons = self.track_lons
+            self.pre_merge_track_lats = self.track_lats
+            self.pre_merge_track_centroid_lat = self.track_centroid_lat
+            self.pre_merge_track_centroid_lon = self.track_centroid_lon
+            self.pre_merge_track_area = self.track_area
+            self.pre_merge_track_speed_centroid = self.track_speed_centroid
+            self.pre_merge_dates_observed = self.dates_observed
+            self.pre_merge_track_centroid_direction = self.track_centroid_direction
 
-        self.track_lons = []
-        self.track_lats = []
-        self.track_centroid_lat = []
-        self.track_centroid_lon = []
-        self.track_area = []
-        self.track_speed_centroid = []
-        self.dates_observed = []
-        self.track_centroid_direction = []
+            self.track_lons = []
+            self.track_lats = []
+            self.track_centroid_lat = []
+            self.track_centroid_lon = []
+            self.track_area = []
+            self.track_speed_centroid = []
+            self.dates_observed = []
+            self.track_centroid_direction = []
 
     def update_centroid_direction(self):
         """
@@ -747,27 +748,28 @@ class Plume:
         :return:
         """
 
-        emission_time = self.dates_observed[0]
+        if trace == None:
+            self.LLJ_prob = np.nan
+        else:
+            emission_time = self.dates_observed[0]
 
-        # Take the smallest time to the nearest 0900UTC
-        nine = emission_time.replace(hour=9, minute=0, second=0)
-        nine_1 = nine + dt.timedelta(days=1)
-        distance_nine = abs(emission_time - nine)
-        distance_nine_1 = abs(nine_1 - emission_time)
-        distance_from_09 = np.min([distance_nine.total_seconds(),
-                                   distance_nine_1.total_seconds()])
+            # Take the smallest time to the nearest 0900UTC
+            nine = emission_time.replace(hour=9, minute=0, second=0)
+            nine_1 = nine + dt.timedelta(days=1)
+            distance_nine = abs(emission_time - nine)
+            distance_nine_1 = abs(nine_1 - emission_time)
+            distance_from_09 = np.min([distance_nine.total_seconds(),
+                                       distance_nine_1.total_seconds()])
 
-        # The probability is calculated as the mean of the distribution of
-        # probabilities from our logistic function
-        self.LLJ_prob = np.nanmean(1 / (1 + np.exp(-(trace['Intercept'] +
-                                            trace['conv_distance'] *
-                                            self.conv_distance +
-                                            trace['time_to_09'] *
-                                            distance_from_09 +
-                                            trace['duration'] *
-                                            self.duration.total_seconds()))))
-
-        print self.LLJ_prob
+            # The probability is calculated as the mean of the distribution of
+            # probabilities from our logistic function
+            self.LLJ_prob = np.nanmean(1 / (1 + np.exp(-(trace['Intercept'] +
+                                                trace['conv_distance'] *
+                                                self.conv_distance +
+                                                trace['time_to_09'] *
+                                                distance_from_09 +
+                                                trace['duration'] *
+                                                self.duration.total_seconds()))))
 
     def convection_infilling(self, lats, lons, clouds):
         """

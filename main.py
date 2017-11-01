@@ -41,7 +41,8 @@ if __name__ == '__main__':
     run_mcmc = True
 
     if run_mcmc:
-        data = get_llj_prob_model.create_plume_dataframe('LLJ_manual_ID.csv',
+        data = get_llj_prob_model.create_plume_dataframe(
+            'LLJ_manual_ID.csv',
                                                          'plume_archive_LLJ')
 
         trace = get_llj_prob_model.logistic_llj_model(data, 'LLJ',
@@ -54,9 +55,9 @@ if __name__ == '__main__':
     month_lower = 6
     month_upper = 6
     day_lower = 1
-    day_upper = 1
-    hour_lower = 8
-    hour_upper = 10
+    day_upper = 30
+    hour_lower = 0
+    hour_upper = 23
     minute_lower = 0
     minute_upper = 45
 

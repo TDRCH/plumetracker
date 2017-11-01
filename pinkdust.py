@@ -5,6 +5,7 @@ import datetime
 import numpy as np
 from netCDF4 import Dataset
 from netCDF4 import date2num
+from netCDF4 import num2date
 from pycoast import ContourWriterAGG
 from PIL import Image
 from pyproj import Proj
@@ -260,7 +261,7 @@ def save_regridded_data_to_nc(filename, array_87, array_108, array_120,
     time = ncfile.createDimension('time', None)
     lat = ncfile.createDimension('lat', len(lats))
     lon = ncfile.createDimension('lon', len(lons))
-    times = ncfile.createVariable('time', np.float64, ('time'))
+    times = ncfile.createVariable('time', np.float32, ('time'))
     latitudes = ncfile.createVariable('latitude', np.float32, ('lat'))
     longitudes = ncfile.createVariable('longitude', np.float32, ('lon'))
     channel_087 = ncfile.createVariable('channel_087', np.float32,
@@ -269,7 +270,8 @@ def save_regridded_data_to_nc(filename, array_87, array_108, array_120,
                                         ('lat', 'lon'))
     channel_120 = ncfile.createVariable('channel_120', np.float32,
                                         ('lat', 'lon'))
-    cloudmask = ncfile.createVariable('cloud_mask', np.float32, ('lat', 'lon'))
+    cloudmask = ncfile.createVariable('cloud_mask', np.float32, (
+                                                                 'lat', 'lon'))
     latitudes.units = 'degrees_north'
     longitudes.units = 'degrees_east'
     times.units = 'hours since 0001-01-01 00:00:00'
@@ -283,6 +285,70 @@ def save_regridded_data_to_nc(filename, array_87, array_108, array_120,
     cloudmask[:] = cloudmask_regridded
     # Forgot to write to time coordinate variable
     ncfile.close()
+
+def create_time_nc_file(filename, dates, lats, lons):
+    """
+    Create an nc file to store BT and cloud mask data across multiple timesteps
+    :param filename:
+    :param times:
+    :param lats:
+    :param lons:
+    :return:
+    """
+
+    ncfile = Dataset(filename, 'w', format='NETCDF3_CLASSIC')
+    ncfile.description = 'Brightness temperature values from Meteosat ' \
+                         'SEVIRI, reprojected to lat/lon from Geostationary.'
+    time = ncfile.createDimension('time', len(dates))
+    lat = ncfile.createDimension('lat', len(lats))
+    lon = ncfile.createDimension('lon', len(lons))
+    times = ncfile.createVariable('time', np.float64, ('time'))
+    latitudes = ncfile.createVariable('latitude', np.float32, ('lat'))
+    longitudes = ncfile.createVariable('longitude', np.float32, ('lon'))
+    latitudes.units = 'degrees_north'
+    longitudes.units = 'degrees_east'
+    times.units = 'hours since 0001-01-01 00:00:00'
+    times.calendar = 'gregorian'
+    channel_087 = ncfile.createVariable('channel_087', np.float32,
+                                        ('time', 'lat', 'lon'))
+    channel_108 = ncfile.createVariable('channel_108', np.float32,
+                                        ('time', 'lat', 'lon'))
+    channel_120 = ncfile.createVariable('channel_120', np.float32,
+                                        ('time', 'lat', 'lon'))
+    cloudmask = ncfile.createVariable('cloud_mask', np.int32, ('time',
+        'lat', 'lon'))
+    latitudes[:] = lats
+    longitudes[:] = lons
+    times[:] = np.asarray([date2num(j, times.units) for j in dates])
+
+    return ncfile
+
+def save_to_existing_nc(dataset_object, array_87, array_108, array_120,
+                        cloudmask_regridded, date):
+    """
+    Saves regridded BT and cloud mask data to an existing nc file with a
+    time, lat and lon dimension. A dataset object is taken as an argument so
+    that the file need not be closed.
+    :param filename:
+    :param array_87:
+    :param array_108:
+    :param array_120:
+    :param cloudmask_regridded:
+    :param date:
+    :return:
+    """
+
+    dates = np.asarray([num2date(j,
+                     dataset_object.variables['time'].units) for j in
+                        dataset_object.variables['time'][:]])
+
+    date_idx = np.where(dates==date)[0][0]
+    dataset_object.variables['channel_087'][date_idx] = array_87
+    dataset_object.variables['channel_108'][date_idx] = array_108
+    dataset_object.variables['channel_120'][date_idx] = array_120
+    dataset_object.variables['cloud_mask'][date_idx] = cloudmask_regridded
+
+    return dataset_object
 
 def process_cloud_mask_grib(date, lats, lons):
     """

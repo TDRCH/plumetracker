@@ -7,6 +7,7 @@ from netCDF4 import Dataset
 import multiprocessing
 import tables
 from netCDF4 import date2num
+import os
 
 import utilities
 import sdf
@@ -137,7 +138,7 @@ if __name__ == '__main__':
     day_lower = 1
     day_upper = 1
     hour_lower = 0
-    hour_upper = 23
+    hour_upper = 1
     minute_lower = 0
     minute_upper = 45
 
@@ -220,13 +221,16 @@ if __name__ == '__main__':
         print SDF_datetimes[i]
 
         # Read in the cloud mask data for that time of day from file
-
+        # Remove the file after use as it is no longer needed
         f = tables.open_file('cloud_masked_bt_15d_' +
                                         str(SDF_datetimes[i].hour) + str(
             SDF_datetimes[i].minute) + '.hdf')
         arrobj = f.get_node('/data')
         cloudscreenedbt_15day = arrobj.read()
         f.close()
+        os.remove('cloud_masked_bt_15d_' +
+                                        str(SDF_datetimes[i].hour) + str(
+            SDF_datetimes[i].minute) + '.hdf')
 
         f = tables.open_file('bt_15d_' +
                              str(SDF_datetimes[i].hour) + str(
@@ -234,6 +238,9 @@ if __name__ == '__main__':
         arrobj = f.get_node('/data')
         bt_15day = arrobj.read()
         f.close()
+        os.remove('bt_15d_' +
+                             str(SDF_datetimes[i].hour) + str(
+            SDF_datetimes[i].minute) + '.hdf')
 
         window_datetime_lower = datetime.datetime(year_lower, month_lower,
                                                   day_lower, hour_lower,

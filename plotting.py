@@ -856,6 +856,97 @@ def plot_emission_direction_map(plume_archive, lats, lons, min_lat=None,
 
     plt.close()
 
+def plot_llj_prob_map(plume_archive, lats, lons, min_lat=None,
+                            min_lon=None,
+                    max_lat=None, max_lon=None):
+    # First we need a grid on which to map all our speeds
+    # This can come from lats and lons
+    # Second, you set that grid to a whole pile of nans
+    # Then you write all your speed values to a nice dictionary
+    # Then when you have your dictionary, average each entry
+    # Then for each latlon tuple, bin it to the nearest latlon on the grid
+    # and write that to the array of nans
+    # Then you do like imshow or something, but you'd have to get regular
+    # latlons probably, unless there's some other grid plotting method which
+    # allows regular latlons
+
+    plt.close()
+
+    fig, ax = plt.subplots()
+
+    latlon_dictionary = {}
+
+    lats = np.linspace(np.min(lats), np.max(lats), 100)
+    lons = np.linspace(np.min(lons), np.max(lons), 100)
+
+    lons, lats = np.meshgrid(lons, lats)
+
+    # Get your zip grid of latlon coordinates
+    latlon_zip = np.array(zip(lats.ravel(), lons.ravel()),
+                          dtype=('f8,'
+                                 'f8')).reshape(lats.shape)
+
+    latlon_zip = latlon_zip.flatten()
+
+    for i in plume_archive:
+        # If the plume has merged, the plume source is found in the
+        # pre-merge track
+
+        emission_lat = plume_archive[i].track_centroid_lat[0]
+        emission_lon = plume_archive[i].track_centroid_lon[0]
+        llj_prob = plume_archive[i].LLJ_prob
+
+        nearest = min(latlon_zip, key=lambda x: utilities.
+                      haversine(x[1],
+                                x[0],
+                                emission_lon,
+                                emission_lat))
+
+        # If this entry already exists in the dictionary we just append to it
+        if (nearest[0], nearest[1]) in latlon_dictionary:
+            latlon_dictionary[(nearest[0], nearest[1])].append(np.nanmean(
+                llj_prob))
+        else:
+            latlon_dictionary[(nearest[0], nearest[1])] = []
+            latlon_dictionary[(nearest[0], nearest[1])].append(
+                np.nanmean(llj_prob))
+
+    # Average together lists for each entry in the dictionary
+    for i in latlon_dictionary:
+        latlon_dictionary[i] = np.nanmean(latlon_dictionary[i])
+
+    # Data array
+    data_array = np.zeros((lons.shape))
+
+    # Find the nearest latlon for each dictionary key, and extract the index
+    # for it
+
+    for i in latlon_dictionary:
+        lat_bool = lats == i[0]
+        lon_bool = lons == i[1]
+        union_bool = lat_bool & lon_bool
+        data_array[union_bool] = latlon_dictionary[i]
+
+    data_array[data_array == 0] = np.nan
+
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    #m.contourf(lons, lats, data_array)
+    discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+    m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
+             cmap=discrete_cmap)
+    plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
+    plt.tight_layout()
+    plt.savefig('LLJ_prob_map.png', bbox_inches='tight')
+
+    plt.close()
+
 def plot_emission_count_map(plume_archive, lats, lons, res=100, min_lat=None,
                             min_lon=None,
                     max_lat=None, max_lon=None):
