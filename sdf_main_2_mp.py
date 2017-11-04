@@ -55,10 +55,33 @@ def cloud_mask_mw(i):
 
     #cloudscreenedbt_15day[:] = np.nan
 
+    print str(oneday_datetimes[i].hour) + str(
+            oneday_datetimes[i].minute)
+
+    f = tables.open_file(
+        '/soge-home/projects/seviri_dust/sdf/intermediary_files/'
+        'cloud_masked_bt_15d_' +
+        str(oneday_datetimes[i].hour) + str(
+            oneday_datetimes[i].minute) + '.hdf', 'w')
+    atom = tables.Atom.from_dtype(cloudscreenedbt_15day.dtype)
+    filters = tables.Filters(complib='blosc', complevel=5)
+    cs = f.create_carray(f.root, 'data', atom,
+                         cloudscreenedbt_15day.shape,
+                         filters=filters)
+
+    g = tables.open_file(
+        '/soge-home/projects/seviri_dust/sdf/intermediary_files/bt_15d_' +
+        str(oneday_datetimes[i].hour) + str(
+            oneday_datetimes[i].minute) + '.hdf', 'w')
+    atom = tables.Atom.from_dtype(bt_15day.dtype)
+    filters = tables.Filters(complib='blosc', complevel=5)
+    bts = g.create_carray(g.root, 'data', atom,
+                         bt_15day.shape,
+                         filters=filters)
+
     # Loop through each day of the time window for this time of day
     for j in np.arange(0, len(datetimes_7dayw)):
         date_w = datetimes_7dayw[j]
-        print date_w
 
         # Extract BT data for this timestep
         filename = '/ouce-home/data/satellite/meteosat/seviri/15-min/' \
@@ -95,34 +118,22 @@ def cloud_mask_mw(i):
             continue
 
         # Apply cloud screening
-        cloudscreenedbt_15day[j], bt_15day[j, 0, :, :], bt_15day[j, 1,
-                                                        :, :], \
-        bt_15day[j, 2, :, :] = sdf.cloud_screen(btdata, clouddata)
+        cloudscreenedbt_15day_array, bt087, bt108, \
+        bt120 = sdf.cloud_screen(btdata, clouddata)
+
+        cs[j] = cloudscreenedbt_15day_array
+        bts[j, 0] = bt087
+        bts[j, 1] = bt108
+        bts[j, 2] = bt120
         btdata.close()
 
     # Save cloud masked data for this time of day to file
-    f = tables.open_file('cloud_masked_bt_15d_' +
-                         str(oneday_datetimes[i].hour) + str(
-        oneday_datetimes[i].minute) + '.hdf', 'w')
-    atom = tables.Atom.from_dtype(cloudscreenedbt_15day.dtype)
-    filters = tables.Filters(complib='blosc', complevel=5)
-    ds = f.create_carray(f.root, 'data', atom,
-                         cloudscreenedbt_15day.shape,
-                         filters=filters)
-    ds[:] = cloudscreenedbt_15day
+
     f.close()
 
     # Save cloud masked data for this time of day to file
-    f = tables.open_file('bt_15d_' +
-                         str(oneday_datetimes[i].hour) + str(
-        oneday_datetimes[i].minute) + '.hdf', 'w')
-    atom = tables.Atom.from_dtype(bt_15day.dtype)
-    filters = tables.Filters(complib='blosc', complevel=5)
-    ds = f.create_carray(f.root, 'data', atom,
-                         bt_15day.shape,
-                         filters=filters)
-    ds[:] = bt_15day
-    f.close()
+
+    g.close()
 
 if __name__ == '__main__':
 
@@ -136,10 +147,10 @@ if __name__ == '__main__':
     month_lower = 7
     month_upper = 7
     day_lower = 1
-    day_upper = 1
+    day_upper = 31
     hour_lower = 0
-    hour_upper = 1
-    minute_lower = 0
+    hour_upper = 23
+    minute_lower = 30
     minute_upper = 45
 
     # Generate the full set of datetimes for the entire period
@@ -173,7 +184,7 @@ if __name__ == '__main__':
     lats = np.ma.array(lats, mask=latmask)
 
     oneday_datetimes = utilities.get_datetime_objects(time_params_oneday)
-
+    """
     print 'Generating cloud masks for all timesteps'
     # Loop through each time in a single day
 
@@ -187,14 +198,15 @@ if __name__ == '__main__':
         p.start()
     for p in processes:
         p.join()
-
+    """
     ### SDF PHASE ###
 
     # Open an nc file in which to store all SDF data for the run period
 
     print 'Generating SDF nc file'
     # File description and dimensions
-    SDFfile = Dataset('SDF_'+SDF_datetimes[0].strftime(
+    SDFfile = Dataset('/soge-home/projects/seviri_dust/sdf/SDF_'
+                      ''+SDF_datetimes[0].strftime(
         '%Y_%m_%d')+'_to_'+SDF_datetimes[-1].strftime('%Y_%m_%d')+'.nc', 'w',
         format='NETCDF4_CLASSIC')
     SDFfile.description = 'SDF values from EUMETSAT SEVIRI on a ' \
@@ -222,26 +234,26 @@ if __name__ == '__main__':
 
         # Read in the cloud mask data for that time of day from file
         # Remove the file after use as it is no longer needed
-        f = tables.open_file('cloud_masked_bt_15d_' +
+        print 'here 1'
+        f = tables.open_file(
+            '/soge-home/projects/seviri_dust/sdf/intermediary_files/'
+            'cloud_masked_bt_15d_' +
                                         str(SDF_datetimes[i].hour) + str(
             SDF_datetimes[i].minute) + '.hdf')
+        print 'here 2'
         arrobj = f.get_node('/data')
         cloudscreenedbt_15day = arrobj.read()
+        print 'here 3'
         f.close()
-        os.remove('cloud_masked_bt_15d_' +
-                                        str(SDF_datetimes[i].hour) + str(
-            SDF_datetimes[i].minute) + '.hdf')
 
-        f = tables.open_file('bt_15d_' +
+        f = tables.open_file(
+            '/soge-home/projects/seviri_dust/sdf/intermediary_files/bt_15d_' +
                              str(SDF_datetimes[i].hour) + str(
             SDF_datetimes[i].minute) + '.hdf')
         arrobj = f.get_node('/data')
         bt_15day = arrobj.read()
         f.close()
-        os.remove('bt_15d_' +
-                             str(SDF_datetimes[i].hour) + str(
-            SDF_datetimes[i].minute) + '.hdf')
-
+        print 'here 4'
         window_datetime_lower = datetime.datetime(year_lower, month_lower,
                                                   day_lower, hour_lower,
                                                   minute_lower) \
@@ -272,7 +284,7 @@ if __name__ == '__main__':
             cloudscreenedbt_15day[np.asarray([j >= BT_15_day_lower_bound
                                               and j <= BT_15_day_upper_bound
                                               for j in datetimes_7dayw])]
-
+        print 'here 5'
         # Get the mean of the 15 day window of cloud screened data
         cloudscreenedbt_15daymean_108_87 = \
             sdf.extract_15day_mean(BT_15_days_screened)
@@ -297,11 +309,14 @@ if __name__ == '__main__':
                                dust_mask_120_108,
                                dust_mask_108_87_anom_screened,
                                ofilename, SDF_datetimes[i], lats, lons)
-
+        print 'here 6'
+        # THIS BIT IS A MAJOR TIME SINK
         SDF_data = SDFvar[:]
+        print 'here 7'
         time_bool = np.asarray([j == SDF_datetimes[i] for j in SDF_datetimes])
+        print 'here 8'
         SDF_data[time_bool] = SDF
-
+        print 'here 9'
         SDFvar[:] = SDF_data
-
+        print 'here 10'
     SDFfile.close()

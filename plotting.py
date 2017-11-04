@@ -48,8 +48,8 @@ def plot_plume_overviews(plume_archive, lats, lons):
 
     # Then make one plot per date
     for i in date_dictionary:
-        print '\n\nProgress:', str((float(plots_done)/float(
-            total_dates))*100)+'%\n\n'
+        print '\n\nProgress:', str(np.round((float(plots_done)/float(
+            total_dates))*100, 2))+'%\n\n'
         plume_data = np.zeros((lats.shape[0], lons.shape[1]))
         plume_data[:] = np.nan
         centroid_lats = []
@@ -62,10 +62,6 @@ def plot_plume_overviews(plume_archive, lats, lons):
 
             dates_observed = plume_archive[j].dates_observed
             date_bool = np.asarray(dates_observed) == i
-
-            if i.hour == 9 and i.minute == 30:
-                print plume_archive[j].plume_id
-                print plume_archive[j].dates_observed
 
             plume_bools = np.asarray(plume_archive[j].track_plume_bool)
 
@@ -115,7 +111,8 @@ def plot_plume_overviews(plume_archive, lats, lons):
                 label_i]), fontsize=8)
             anns.append(ann)
 
-        plt.savefig('Plume_overview_'+i.strftime("%Y%m%d%H%M")+'.png')
+        plt.savefig('Plume_flickertest_overview_'+i.strftime(
+            "%Y%m%d%H%M")+'.png')
 
         centroidplot.remove()
         for coll in contourplot.collections:
@@ -596,7 +593,6 @@ def plot_emission_speed_map(plume_archive, lats, lons, min_lat=None,
                               3]
             if emission_speeds >= 50:
                 emission_speeds = np.nan
-            print emission_speeds
         else:
             if len(plume_archive[i].track_speed_centroid) < 4:
                 continue
@@ -947,9 +943,10 @@ def plot_llj_prob_map(plume_archive, lats, lons, min_lat=None,
 
     plt.close()
 
-def plot_emission_count_map(plume_archive, lats, lons, res=100, min_lat=None,
-                            min_lon=None,
-                    max_lat=None, max_lon=None):
+def plot_emission_count_map(plume_archive,
+                            lats, lons, title='plume_count_map.png', res=100,
+                            min_lat=None, min_lon=None,
+                             max_lat=None, max_lon=None):
     """
     Plots a map of emission count, akin to Ashpole and Washington (2012)
     key figure (to be updated to frequency)
@@ -1004,8 +1001,6 @@ def plot_emission_count_map(plume_archive, lats, lons, res=100, min_lat=None,
             latlon_dictionary[(nearest[0], nearest[1])] = 0
             latlon_dictionary[(nearest[0], nearest[1])] += 1
 
-    print latlon_dictionary
-
     # Data array
     data_array = np.zeros((lons.shape))
 
@@ -1035,9 +1030,105 @@ def plot_emission_count_map(plume_archive, lats, lons, res=100, min_lat=None,
 
     plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
     plt.tight_layout()
-    plt.savefig('plume_count_map.png', bbox_inches='tight')
+    plt.savefig(title, bbox_inches='tight')
 
     plt.close()
+
+def plot_multiyear_emission_count_map(plume_archives,
+                            lats, lons, title='plume_count_map_multiyear.png',
+                                      res=500,
+                            min_lat=None, min_lon=None,
+                             max_lat=None, max_lon=None):
+    """
+    Plots a map of emission count, akin to Ashpole and Washington (2012)
+    key figure (to be updated to frequency)
+    :param plume_archive:
+    :param lats:
+    :param lons:
+    :param min_lat:
+    :param min_lon:
+    :param max_lat:
+    :param max_lon:
+    :return:
+    """
+
+    plt.close()
+
+    fig, ax = plt.subplots()
+
+    latlon_dictionary = {}
+
+    lats = np.linspace(np.min(lats), np.max(lats), res)
+    lons = np.linspace(np.min(lons), np.max(lons), res)
+    lons, lats = np.meshgrid(lons, lats)
+
+    # Get your zip grid of latlon coordinates
+    latlon_zip = np.array(zip(lats.ravel(), lons.ravel()), dtype=('f8,'
+                                                                  'f8')). \
+        reshape(
+        lats.shape)
+
+    latlon_zip = latlon_zip.flatten()
+
+    for plume_archive in plume_archives:
+
+        for i in plume_archive:
+            # If the plume has merged, the plume source is found in the
+            # pre-merge track
+            if plume_archive[i].merged == True:
+                emission_lat = plume_archive[i].pre_merge_track_centroid_lat[0]
+                emission_lon = plume_archive[i].pre_merge_track_centroid_lon[0]
+            else:
+                emission_lat = plume_archive[i].track_centroid_lat[0]
+                emission_lon = plume_archive[i].track_centroid_lon[0]
+
+            nearest = min(latlon_zip, key=lambda x: utilities.
+                          haversine(x[1],
+                          x[0],
+                          emission_lon,
+                          emission_lat))
+
+            # If this entry already exists in the dictionary we just add to it
+            if (nearest[0], nearest[1]) in latlon_dictionary:
+                latlon_dictionary[(nearest[0], nearest[1])] += 1
+            else:
+                latlon_dictionary[(nearest[0], nearest[1])] = 0
+                latlon_dictionary[(nearest[0], nearest[1])] += 1
+
+    # Data array
+    data_array = np.zeros((lons.shape))
+
+    # Find the nearest latlon for each dictionary key, and extract the index
+    # for it
+
+    for i in latlon_dictionary:
+        lat_bool = lats == i[0]
+        lon_bool = lons == i[1]
+        union_bool = lat_bool & lon_bool
+        data_array[union_bool] = latlon_dictionary[i]
+
+    data_array[data_array == 0] = np.nan
+
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    # m.contourf(lons, lats, data_array)
+    discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+    m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
+             cmap=discrete_cmap, vmin=0, vmax=25)
+
+    plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
+    plt.tight_layout()
+    plt.savefig(title, bbox_inches='tight')
+
+    plt.close()
+
+    np.save('multiyear_dust_frequency_array', data_array)
 
 def plot_plume_tracks(plume_archive, lats, lons, min_lat=None,
                             min_lon=None,

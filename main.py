@@ -37,8 +37,8 @@ if __name__ == '__main__':
     # Generate the Bayesian multivariate logistic model and sample the
     # parameter space to get a (burned) trace
 
-    run = True
-    run_mcmc = True
+    run = False
+    run_mcmc = False
 
     if run_mcmc:
         data = get_llj_prob_model.create_plume_dataframe(

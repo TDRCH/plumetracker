@@ -84,20 +84,97 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
             if new_ids.shape[0] > 0:
                 new_ids = np.unique(new_ids[new_id_bool])
         old_id_array = np.zeros(np.shape(sdf_clusters))
+        # An array of previous IDs so we can check if the same ID has been
+        # reassigned more than once (i.e. a split)
+        overlap_prev_ids = {}
+        split_ids = []
         for i in overlapping_ids:
+            current = sdf_clusters[sdf_clusters == i]
             prev_ids = sdf_prev[sdf_clusters == i]
             # Remove zeros
             prev_ids = prev_ids[prev_ids != 0]
             # Take the most common of the previous IDs as the one which should
             # be applied to the new plume
             counts = np.bincount(prev_ids)
+            current_size = np.bincount(current)
             prev_id = np.argmax(counts)
-            # Set prev_ID to whatever that is
-            old_id_array[sdf_clusters == i] = prev_id
-            sdf_clusters[sdf_clusters == i] = prev_id
             if len(np.unique(prev_ids)) > 1:
                 merge_ids.append(prev_id)
 
+            old_id_array[sdf_clusters == i] = prev_id
+            sdf_clusters[sdf_clusters == i] = prev_id
+
+            """
+
+            # Check if the ID is already a key in the dictionary
+            if prev_id in overlap_prev_ids:
+                # This previous ID was involved in a split
+                split_ids.append(prev_id)
+                if overlap_prev_ids[prev_id] < current_size:
+                    # This is the largest sized plume for this previous ID
+                    overlap_prev_ids[prev_id] = current_size
+                    # Set prev_ID to whatever that is
+                    old_id_array[sdf_clusters == i] = prev_id
+                    sdf_clusters[sdf_clusters == i] = prev_id
+            else:
+                overlap_prev_ids[prev_id] = current_size
+            """
+            # The IDs we want now are the new plume IDs which are not
+                # continuations of the old, so that we don't misidentify
+                # them as a source. We want the plume IDs which were not
+                # converted to a prev ID because another plume ID had a
+                # larger area
+            # We also want to identify the prev ID which split so that we
+                # don't get the propagation wrong on it
+
+            # So as for sub-250 plumes - they need to be assigned temporary
+                # IDs, then as plume tracker rolls through, it gets to the
+                # end of these temp plumes' lifetime, checks if they ever
+                # got to 250 size and, if they did, grants them status as a
+                # true plume. Otherwise they get cast into the flames of
+                # oblivion
+
+            # The above is quite a computationally intensive method,
+                # however. It requires you to basically be tracking a LOT of
+                #  random little baby plumes, making plume bools for them
+                # and all
+
+                # How about instead, if a plume is close to the 250
+                # limit, it checks for flickering by looking at the raw
+                # SDF for the previous timestep and seeing if there's
+                # any overlapping SDF which are not already accounted for
+                # if there are, it adds a previous timestep and does all
+                #  the bells and whistles, then it checks the timestep
+                # before that...HENCE IT IS THE CHAIN FLICKER CHECKER
+
+                # If you were to do that with the plumescanner part,
+                # you'd have to look at the previous timestep again,
+                # and then the one before..all rather tricky
+
+                # With plumetracker, you at least have access to all the
+                #  timesteps from the tracks.
+
+        """
+        prev_id_counts = np.unique(overlap_prev_ids, return_counts=True)[1]
+        for i in np.arange(0, len(prev_id_counts)):
+            if prev_id_counts[i] > 1:
+                split_ids.append(overlap_prev_ids[i])
+                # Find the size of the plume
+                # If the plume is the largest, it keeps its ID
+                # Otherwise it gets assigned a new one
+                # Or, as you're assigning prev ids above, add the size of
+                # the overlapping id plume to a list. Then, if it turns out
+                # a plume is within overlap prev ids, add the prev id to
+                # split ids, then test if the size of this plume is larger
+                # than the size of the previous plume wit the same assigned
+                # prev id. If it's larger, it gets the prev id, and the
+                # previous plume gets assigned a different one
+                # So for this you need a dictionary of overlapping
+                # prev ids and the size of their respective plumes
+
+                ## WATCH OUT ## This current code creates plumes from
+                # splits, which will be identified as new plumes
+        """
         large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
 
         # Fix the new IDs so that they follow directly from the previous
@@ -114,7 +191,7 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
                 replacement_new_ids[i])
                 new_ids[i] = replacement_new_ids[i]
 
-    return sdf_clusters, new_ids, large_plume_ids, merge_ids
+    return sdf_clusters, new_ids, large_plume_ids, merge_ids#, split_ids
 
 def plume_infilling(sdf_now, clouds):
     """
@@ -219,9 +296,12 @@ class Plume:
 
         centroid_lon = sum_x/plume_lons.shape[0]
         centroid_lat = sum_y/plume_lons.shape[0]
-
         self.centroid_lon = centroid_lon
         self.centroid_lat = centroid_lat
+
+        #print 'Lons and lats of plume', self.plume_id
+        #print centroid_lon
+        #print centroid_lat
 
         self.track_centroid_lat.append(centroid_lat)
         self.track_centroid_lon.append(centroid_lon)
@@ -246,25 +326,27 @@ class Plume:
 
     def update_area(self):
 
-        cop = {"type": "Polygon", "coordinates": [zip(self.plume_lons,
-                                                      self.plume_lats)]}
-        s = shape(cop)
+        if len(self.plume_lons) > 2 and len(self.plume_lats) > 2:
 
-        geom = Polygon([(a, b) for a, b in zip(self.plume_lons,
-                                               self.plume_lats)])
-        geom_area = ops.transform(
-            partial(
-                pyproj.transform,
-                pyproj.Proj(init='EPSG:4326'),
-                pyproj.Proj(
-                    proj='aea',
-                    lat1=geom.bounds[1],
-                    lat2=geom.bounds[3])),
-            geom)
+            cop = {"type": "Polygon", "coordinates": [zip(self.plume_lons,
+                                                          self.plume_lats)]}
+            s = shape(cop)
 
-        # Store area in m^2
-        self.area = geom_area.area
-        self.track_area.append(geom_area.area)
+            geom = Polygon([(a, b) for a, b in zip(self.plume_lons,
+                                                   self.plume_lats)])
+            geom_area = ops.transform(
+                partial(
+                    pyproj.transform,
+                    pyproj.Proj(init='EPSG:4326'),
+                    pyproj.Proj(
+                        proj='aea',
+                        lat1=geom.bounds[1],
+                        lat2=geom.bounds[3])),
+                geom)
+
+            # Store area in m^2
+            self.area = geom_area.area
+            self.track_area.append(geom_area.area)
 
     def update_leading_edge_4(self, sdf_plumes, lons, lats):
         """
@@ -369,48 +451,55 @@ class Plume:
         :return:
         """
 
-        # Subtract the mean from each dimension
-        lons = self.plume_lons - np.mean(self.plume_lons)
-        lats = self.plume_lats - np.mean(self.plume_lats)
+        if len(self.plume_lons) > 1 and len(self.plume_lats) > 1:
 
-        # Calculate the covariance matrix of the coordinates
-        coords = np.vstack([lons, lats])
-        cov = np.cov(coords)
-        evals, evecs = np.linalg.eig(cov)
+            # Subtract the mean from each dimension
+            lons = self.plume_lons - np.mean(self.plume_lons)
+            lats = self.plume_lats - np.mean(self.plume_lats)
 
-        # Sort eigenvalues
-        sort_indices = np.argsort(evals)[::-1]
-        evec1, evec2 = evecs[:, sort_indices]
+            # Calculate the covariance matrix of the coordinates
+            coords = np.vstack([lons, lats])
+            cov = np.cov(coords)
+            evals, evecs = np.linalg.eig(cov)
 
-        scale = 20
+            # Sort eigenvalues
+            sort_indices = np.argsort(evals)[::-1]
+            evec1, evec2 = evecs[:, sort_indices]
 
-        # Add the mean back in
-        self.lon_major = evec1[0]*-scale*2+np.nanmean(self.plume_lons)
-        self.lat_major = evec1[1]*-scale*2+np.nanmean(self.plume_lats)
-        self.lon_minor = evec2[0]*-scale+np.nanmean(self.plume_lons)
-        self.lat_minor = evec2[1]*-scale+np.nanmean(self.plume_lats)
+            scale = 20
 
-        self.lon_major_2 = evec1[0]*scale*2+np.nanmean(self.plume_lons)
-        self.lat_major_2 = evec1[1]*scale*2+np.nanmean(self.plume_lons)
-        self.lon_minor_2 = evec2[0]*scale+ np.nanmean(self.plume_lons)
-        self.lat_minor_2 = evec2[1]*scale+ np.nanmean(self.plume_lons)
+            # Add the mean back in
+            self.lon_major = evec1[0]*-scale*2+np.nanmean(self.plume_lons)
+            self.lat_major = evec1[1]*-scale*2+np.nanmean(self.plume_lats)
+            self.lon_minor = evec2[0]*-scale+np.nanmean(self.plume_lons)
+            self.lat_minor = evec2[1]*-scale+np.nanmean(self.plume_lats)
 
-        self.primary_axis_direction = utilities.\
-                calculate_initial_compass_bearing(
-            (self.lat_major,
-             self.lon_major),
-            (self.lat_major_2,
-             self.lon_major_2))
+            self.lon_major_2 = evec1[0]*scale*2+np.nanmean(self.plume_lons)
+            self.lat_major_2 = evec1[1]*scale*2+np.nanmean(self.plume_lons)
+            self.lon_minor_2 = evec2[0]*scale+ np.nanmean(self.plume_lons)
+            self.lat_minor_2 = evec2[1]*scale+ np.nanmean(self.plume_lons)
 
-        self.track_primary_axis_direction.append(self.primary_axis_direction)
+            self.primary_axis_direction = utilities.\
+                    calculate_initial_compass_bearing(
+                (self.lat_major,
+                 self.lon_major),
+                (self.lat_major_2,
+                 self.lon_major_2))
+
+            self.track_primary_axis_direction.append(self.primary_axis_direction)
 
     def update_duration(self, date):
         """
         Updates the duration of the dust plume with the time since its emission
+
+        NOTE: if the plume only lasts one timestep but has backwards
+        flickerchecking, it will record a duration of zero (i.e. this is a
+        bug ya big goon)
         :return:
         """
 
-        self.duration = date - self.emission_time
+        if date >= self.emission_time:
+            self.duration = date - self.emission_time
         self.dates_observed.append(date)
 
     def update_max_extent(self):
@@ -547,6 +636,7 @@ class Plume:
                                                    self.track_centroid_lon[-2]),
                                                   (self.centroid_lat,
                                                    self.centroid_lon))
+
 
             #print self.centroid_direction
 
@@ -769,7 +859,8 @@ class Plume:
                                                 trace['time_to_09'] *
                                                 distance_from_09 +
                                                 trace['duration'] *
-                                                self.duration.total_seconds()))))
+                                                self.duration.total_seconds())
+                                                       )))
 
     def convection_infilling(self, lats, lons, clouds):
         """
@@ -923,8 +1014,6 @@ class Plume:
 
                     # Now say you got the centroid of that cloud
 
-                    # What if you found holes in the
-
                     neighbours = utilities.get_neighbours(i,
                                                 shape=cloud_box_all.shape)
                     total_neighbours = len(neighbours)
@@ -964,6 +1053,99 @@ class Plume:
             # Update the plume's position using the newly calculated SDF plumes
             self.update_position(lats, lons, sdf_plumes, self.plume_id)
 
+    def chain_flickerchecker(self, raw_sdf_prev):
+        """
+        If the plume is new, checks if any plume actually exists in the
+        previous timestep which was filtered out by the 250 minimum size
+        :return:
+        """
+
+        if len(raw_sdf_prev) > 0:
+            plume_bool = self.plume_bool.toarray()
+            # Only proceed if we have more than one pixel activated
+            plumes_prev = deepcopy(raw_sdf_prev)
+            label_objects, nb_labels = ndi.label(plumes_prev)
+            local_label_objects = deepcopy(label_objects)
+            local_label_objects[~plume_bool] = 0
+            sizes = np.bincount(local_label_objects.ravel())
+            # Only proceed if we have plumes larger than size one
+            if len(sizes) > 1:
+                if np.max(sizes[1:] > 1):
+                    sizes = sizes[sizes != 0]
+                    sizes_sorted = deepcopy(sizes)
+                    sizes_sorted.sort()
+                    second_largest = sizes_sorted[-2]
+                    # We want the second largest as the largest is the
+                    # background
+                    mask_sizes = sizes == second_largest
+                    largest_id = np.unique(local_label_objects)[mask_sizes][0]
+                    mask_sizes[0] = 0
+                    #plumes_prev = mask_sizes[label_objects]
+                    plumes_prev[label_objects != largest_id] = False
+                    plumes_prev = plumes_prev.astype(int)
+                    #print np.bincount(plumes_prev.ravel())
+                    plumes_prev = plumes_prev == 1
+                    """
+                    plt.contourf(plumes_prev)
+                    plt.savefig('flickered_plume_' + str(self.plume_id))
+                    plt.close()
+                    checkgrid = np.zeros(plumes_prev.shape)
+                    checkgrid[plumes_prev] = 4
+                    plt.contourf(checkgrid)
+                    plt.savefig('flickered_plume_check' + str(
+                        self.plume_id))
+                    plt.close()
+                    """
+                    if np.bincount(plumes_prev.ravel())[1] > 250:
+                        # We found a plume which went underneath the plume
+                        # size threshold - this is a flickering plume
+                        return plumes_prev, self.plume_id, True
+                    return plumes_prev, self.plume_id, False
+                else:
+                    return [], None, False
+            else:
+                return [], None, False
+        else:
+            return [], None, False
+
+    def process_missing_plume(self):
+        """
+        After running an update needed due to a missing plume, moves the
+        track values to the start of the track rather than the end (missing
+        plumes are always in the timestep before).
+        :param sdf_plumes:
+        :param datetime:
+        :return:
+        """
+
+        self.track_centroid_direction = list(np.roll(
+            self.track_centroid_direction, 1))
+        self.centroid_direction = self.track_centroid_direction[-1]
+        self.track_lats = list(np.roll(self.track_lats, 1))
+        self.plume_lats = self.track_lats[-1]
+        self.track_lons = list(np.roll(self.track_lons, 1))
+        self.plume_lons = self.track_lons[-1]
+        self.track_centroid_lat = list(np.roll(self.track_centroid_lat, 1))
+        self.track_centroid_lon = list(np.roll(self.track_centroid_lon, 1))
+        self.centroid_lat = self.track_centroid_lat[-1]
+        self.centroid_lon = self.track_centroid_lon[-1]
+        self.track_plume_bool = list(np.roll(self.track_plume_bool, 1))
+        self.track_edges_lat = list(np.roll(self.track_edges_lat, 1))
+        self.track_edges_lon = list(np.roll(self.track_edges_lat, 1))
+        self.dates_observed = list(np.roll(self.dates_observed, 1))
+        self.track_area = list(np.roll(self.track_area, 1))
+        self.area = self.track_area[-1]
+        self.track_centroid_direction = list(np.roll(
+            self.track_centroid_direction, 1))
+        self.centroid_direction = self.track_centroid_direction[-1]
+        self.track_primary_axis_direction = list(np.roll(
+            self.track_primary_axis_direction, 1))
+        self.primary_axis_direction = self.track_primary_axis_direction
+        self.track_speed_centroid = list(np.roll(self.track_speed_centroid, 1))
+        self.speed_centroid = self.track_speed_centroid[-1]
+
+        self.emission_time = self.dates_observed[0]
+        self.duration = self.dates_observed[-1]-self.emission_time
 
 class Convection:
 

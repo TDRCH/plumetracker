@@ -23,12 +23,14 @@ def wrapper(yearmonth):
     year_upper = yearmonth[0]
     month_lower = yearmonth[1][0]
     month_upper = yearmonth[1][-1]
-    day_lower = 1
-    day_upper = 31
-    hour_lower = 0
-    hour_upper = 23
+    month_lower = 7
+    month_upper = 7
+    day_lower = 8
+    day_upper = 9
+    hour_lower = 3
+    hour_upper = 4
     minute_lower = 0
-    minute_upper = 45
+    minute_upper = 0
 
     time_params = np.array([year_lower, year_upper, month_lower,
                             month_upper, day_lower, day_upper,
@@ -50,6 +52,7 @@ def wrapper(yearmonth):
     lons = np.ma.array(lons, mask=lonmask)
     lats = np.ma.array(lats, mask=latmask)
     sdf_previous = None
+    raw_sdf_prev = []
     clouds_previous = None
     ids_previous = []
     cloud_ids_previous = []
@@ -69,7 +72,9 @@ def wrapper(yearmonth):
 
         plume_objects = {}
 
-        plume_archive = shelve.open('plume_archive_'+str(yearmonth[0]))
+        plume_archive = shelve.open(
+            '/soge-home/projects/seviri_dust/plumetracker'
+                                    'plume_archive_flicker_'+str(yearmonth[0]))
 
         for date_i in np.arange(0, len(datestrings)):
             runtime = datetimes[date_i] - datetimes[0]
@@ -108,7 +113,8 @@ def wrapper(yearmonth):
                     '-__.nc')
             except:
 
-                if os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/15-min/'
+                if os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/'
+                                  '15-min/'
                     '0.03x0.03/bt'
                     '/nc/'
                     +
@@ -202,7 +208,7 @@ def wrapper(yearmonth):
 
                 # Then, for each new ID, we initialise plume objects
                 for i in np.arange(0, len(new_ids)):
-                    # print 'Creating new plume', new_ids[i]
+                    #print 'Creating new plume', new_ids[i]
                     plume = plumes.Plume(new_ids[i], datetimes[date_i])
                     plume.update_position(lats, lons, sdf_plumes, new_ids[i])
                     plume.update_duration(datetimes[date_i])
@@ -216,6 +222,180 @@ def wrapper(yearmonth):
                     plume.update_most_likely_source()
                     # plume.update_leading_edge_4(sdf_plumes, lons, lats)
                     plume_objects[str(new_ids[i])] = plume
+                    missing_plume, missing_id, flickered = \
+                        plume.chain_flickerchecker(
+                        raw_sdf_prev)
+                    if flickered:
+                        raise ValueError('Found an overlaping plume in the '
+                                         'previous timestep larger than size '
+                                         '250 - a new plume should not be '
+                                         'initiated here')
+                    steps_back = 1
+                    # As long as there is an overlapping previous plume,
+                    #  keep updating it back in time
+                    while len(missing_plume) > 0:
+                        # We can only step back to the first timestep and no
+                        # earlier
+                        if (date_i - steps_back) < 0:
+                            missing_plume = []
+                            break
+                        else:
+                            missing_date = datetimes[date_i-steps_back]
+                            missing_sdf_plumes = np.zeros(missing_plume.shape)
+                            missing_plume = missing_plume == 1
+                            missing_sdf_plumes[missing_plume] = missing_id
+                            # Run all the updates that would be used for a
+                            # new plume
+                            plume.update_position(lats, lons,
+                                                  missing_sdf_plumes,
+                                                  missing_id)
+                            # So our problem at the moment is that the time
+                            # of the flickerchecked plume does not match up
+                            # with the last observation time of any previous
+                            #  plume, and the lats and lons are super strange
+                            plume.update_duration(missing_date)
+                            plume.update_bbox()
+                            plume.update_majorminor_axes()
+                            plume.update_area()
+                            plume.update_max_extent()
+                            plume.update_centroid_speed()
+                            plume.update_centroid_direction()
+                            plume.check_conv_distance(lats, lons, clouds)
+                            plume.update_most_likely_source()
+                            plume.process_missing_plume()
+                            #print 'Updated missing plume back '+str(
+                            #    steps_back)+' steps'
+                            steps_back += 1
+                            if (date_i - steps_back) < 0:
+                                missing_plume = []
+                                break
+                            # Pull out data from the timestep before to
+                            # continue the chain
+                            raw_sdf_prev_prev_data = Dataset(
+                            '/soge-home/data_not_backed_up/satellite/meteosat/'
+                            'seviri/'
+                            '15-min/0.03x0.03/sdf/nc/' +
+                            datetimes[date_i-steps_back].strftime("%B").upper(
+                            ) + str(datetimes[date_i-steps_back].year) +
+                            '/SDF_v2/SDF_v2.' + \
+                            datestrings[date_i-steps_back] + '.nc')
+                            if 'time' in raw_sdf_prev_prev_data.variables:
+                                raw_sdf_prev_prev = \
+                                    raw_sdf_prev_prev_data.variables[
+                                        'bt108'][0]
+                            else:
+                                raw_sdf_prev_prev = \
+                                    raw_sdf_prev_prev_data.variables[
+                                'bt108'][:]
+                            missing_plume, missing_id, flickered = \
+                                plume.chain_flickerchecker(
+                            raw_sdf_prev_prev)
+
+                            if flickered:
+                                print 'Found a flickered plume. Searching ' \
+                                      'for the corresponding archived plume.'
+                                # We have a plume in a previous timestep
+                                # which flickered
+                                plume_archive_keys = np.asarray([int(i) for
+                                                                 i in
+                                                                plume_archive])
+                                # Sort the keys in reverse order as the
+                                # plume we want is most likely to have a
+                                # high ID
+                                plume_archive_keys[::-1].sort()
+
+                                missing_plume = missing_plume == 1
+                                missing_sdf_plumes = np.zeros(
+                                    missing_plume.shape)
+                                missing_sdf_plumes[missing_plume] = missing_id
+                                plume_bool = missing_sdf_plumes == missing_id
+
+                                search_centroid_lon = \
+                                    np.nanmean(lons[plume_bool])
+
+                                search_centroid_lat = \
+                                    np.nanmean(lats[plume_bool])
+
+                                plume_lons = lons[plume_bool]
+                                plume_lats = lats[plume_bool]
+
+                                #print 'Tracked back to these lons and lats'
+                                #print np.sum(plume_lons)/plume_lons.shape[0]
+                                #print np.sum(plume_lats)/plume_lats.shape[0]
+                                #print 'At time'
+                                search_date = datetimes[date_i-steps_back]
+                                #print search_date
+
+                                found_plume = False
+                                for key in plume_archive_keys:
+                                    #print 'Searching in plume archive'
+                                    #print key
+                                   # print plume_archive[str(
+                                    #            key)].dates_observed[-1]
+                                    #print plume_archive[\
+                                    #        str(key)].centroid_lon
+                                   # print plume_archive[str(
+                                    #    key)].centroid_lat
+                                    if search_centroid_lon == plume_archive[\
+                                            str(key)].centroid_lon and \
+                                            search_centroid_lat ==\
+                                            plume_archive[str(
+                                                key)].centroid_lat and \
+                                            plume_archive[str(
+                                                key)].dates_observed[-1] == \
+                                                    search_date:
+                                    #    print 'Found it. ID is', \
+                                    #        plume_archive[str(key)].plume_id
+                                        found_plume = True
+                                        # At this point, the plume should be
+                                        # appended to the original plume,
+                                        # with a plume method, then the
+                                        # plume is resurrected from plume
+                                        # archive
+                                        break
+                                # If we didn't find the plume in the plume
+                                # archive, it must still be active
+                                if found_plume == False:
+                                    plume_object_keys = np.asarray([int(i) for
+                                                                     i in
+                                                                plume_objects])
+                                    # Sort the keys in reverse order as the
+                                    # plume we want is most likely to have a
+                                    # high ID
+                                    plume_object_keys[::-1].sort()
+                                    for key in plume_object_keys:
+                                        #print 'Searching in plume objects'
+                                        #print plume_objects[ \
+                                        #    str(
+                                        #        key)].plume_id
+                                        #print plume_objects[str(
+                                        #    key)].dates_observed[
+                                        #    -1]
+                                        #print plume_objects[ \
+                                        #                str(
+                                        #            key)].centroid_lon
+                                        #print plume_objects[ \
+                                        #    str(
+                                         #       key)].centroid_lat
+
+                                        if search_centroid_lon == \
+                                                plume_objects[ \
+                                                        str(
+                                                    key)].centroid_lon and \
+                                                    search_centroid_lat == \
+                                                    plume_objects[str(
+                                                    key)].centroid_lat and \
+                                                    plume_objects[str(
+                                                    key)].dates_observed[
+                                                    -1] == \
+                                                    search_date:
+                                            found_plume = True
+                                            #print 'Found it. ID is', \
+                                            #    plume_objects[
+                                            #        str(key)].plume_id
+                                            break
+
+                                break
 
                 # For merged IDs, we move the tracks to pre-merge tracks
                 for i in np.arange(0, len(merge_ids)):
@@ -224,7 +404,7 @@ def wrapper(yearmonth):
 
                 # For old IDs, we just run an update.
                 for i in np.arange(0, len(old_ids)):
-                    # print 'Updating plume', old_ids[i]
+                    #print 'Updating plume', old_ids[i]
                     plume = plume_objects[str(old_ids[i])]
                     plume.update_position(lats, lons, sdf_plumes, old_ids[i])
                     plume.update_duration(datetimes[date_i])
@@ -252,14 +432,20 @@ def wrapper(yearmonth):
                     # plume.update_mechanism_likelihood()
                     plume.update_llj_probability(trace)
                     plume_archive[str(removed_ids[i])] = plume
+                    #print 'Plume', plume.plume_id,'removed. Final lons and \
+                    #                                             lats:'
+                    #print plume.centroid_lon
+                    #print plume.centroid_lat
                     del plume_objects[str(removed_ids[i])]
 
                 if len(np.unique(sdf_plumes)) < 2:
                     sdf_previous = None
                     ids_previous = []
+                    raw_sdf_prev = []
                 else:
                     sdf_previous = sdf_plumes
                     ids_previous = plume_ids
+                    raw_sdf_prev = sdf_now
 
                 # if runtime > datetime.timedelta(hours=0):
                 #    plotting.plot_plumes(plume_objects, sdf_plumes, lats, lons, bt,
