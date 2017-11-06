@@ -23,14 +23,12 @@ def wrapper(yearmonth):
     year_upper = yearmonth[0]
     month_lower = yearmonth[1][0]
     month_upper = yearmonth[1][-1]
-    month_lower = 7
-    month_upper = 7
-    day_lower = 8
-    day_upper = 9
-    hour_lower = 3
-    hour_upper = 4
+    day_lower = 1
+    day_upper = 31
+    hour_lower = 0
+    hour_upper = 23
     minute_lower = 0
-    minute_upper = 0
+    minute_upper = 45
 
     time_params = np.array([year_lower, year_upper, month_lower,
                             month_upper, day_lower, day_upper,
@@ -64,6 +62,9 @@ def wrapper(yearmonth):
     used_cloud_ids = []
     used_colour_IDs = {}
     plume_objects = []
+    flicker_ids = []
+    reintroduced_ids = []
+    last_50_ids = []
 
     # Restrict the lons and lats to the CWS alone
     lonbool = np.asarray([j >= -20 and j <= 10 for j in lons[0]])
@@ -73,8 +74,9 @@ def wrapper(yearmonth):
         plume_objects = {}
 
         plume_archive = shelve.open(
-            '/soge-home/projects/seviri_dust/plumetracker'
-                                    'plume_archive_flicker_'+str(yearmonth[0]))
+            '/soge-home/projects/seviri_dust/plumetracker/'
+                                    'plume_archive_flicker_v2_'+str(yearmonth[
+                                                                        0]))
 
         for date_i in np.arange(0, len(datestrings)):
             runtime = datetimes[date_i] - datetimes[0]
@@ -172,6 +174,13 @@ def wrapper(yearmonth):
                     bt_108 = bt.variables['bt108'][:]
                 clouds = bt_108 < 270
 
+                # Add the reintroduced plumes back into the running
+                for i in np.arange(0, len(reintroduced_ids)):
+                    #print 'Reintroducing plume', reintroduced_ids[i]
+                    sdf_previous[sdf_previous == flicker_ids[i]] = \
+                        reintroduced_ids[i]
+                    ids_previous = np.append(ids_previous, reintroduced_ids[i])
+
                 # Get plumes first by scanning for them
                 sdf_plumes, new_ids, plume_ids, merge_ids = plumes.\
                     scan_for_plumes(
@@ -179,6 +188,16 @@ def wrapper(yearmonth):
                     sdf_previous,
                     used_ids,
                     clouds)
+
+                for i in np.arange(0, len(reintroduced_ids)):
+                    if reintroduced_ids[i] not in plume_ids:
+                        #print 'But plume '+str(reintroduced_ids[i])+' sadly ' \
+                        #                                            'died.'
+                        pass
+
+                # Clear flicker IDs and reintroduced IDs
+                flicker_ids = []
+                reintroduced_ids = []
 
                 # We could here do infilling, then at least you'll have it for
                 # the next iteration. But if you've labelled them already you
@@ -234,6 +253,7 @@ def wrapper(yearmonth):
                     # As long as there is an overlapping previous plume,
                     #  keep updating it back in time
                     while len(missing_plume) > 0:
+                        #print 'Rolling back plume', new_ids[i]
                         # We can only step back to the first timestep and no
                         # earlier
                         if (date_i - steps_back) < 0:
@@ -249,10 +269,6 @@ def wrapper(yearmonth):
                             plume.update_position(lats, lons,
                                                   missing_sdf_plumes,
                                                   missing_id)
-                            # So our problem at the moment is that the time
-                            # of the flickerchecked plume does not match up
-                            # with the last observation time of any previous
-                            #  plume, and the lats and lons are super strange
                             plume.update_duration(missing_date)
                             plume.update_bbox()
                             plume.update_majorminor_axes()
@@ -292,13 +308,11 @@ def wrapper(yearmonth):
                             raw_sdf_prev_prev)
 
                             if flickered:
-                                print 'Found a flickered plume. Searching ' \
-                                      'for the corresponding archived plume.'
+                                #print 'Found a flickered plume. Searching ' \
+                                #      'for the corresponding archived plume.'
                                 # We have a plume in a previous timestep
                                 # which flickered
-                                plume_archive_keys = np.asarray([int(i) for
-                                                                 i in
-                                                                plume_archive])
+                                plume_archive_keys = last_50_ids.astype(int)
                                 # Sort the keys in reverse order as the
                                 # plume we want is most likely to have a
                                 # high ID
@@ -319,24 +333,14 @@ def wrapper(yearmonth):
                                 plume_lons = lons[plume_bool]
                                 plume_lats = lats[plume_bool]
 
-                                #print 'Tracked back to these lons and lats'
-                                #print np.sum(plume_lons)/plume_lons.shape[0]
-                                #print np.sum(plume_lats)/plume_lats.shape[0]
-                                #print 'At time'
                                 search_date = datetimes[date_i-steps_back]
                                 #print search_date
 
                                 found_plume = False
                                 for key in plume_archive_keys:
                                     #print 'Searching in plume archive'
-                                    #print key
-                                   # print plume_archive[str(
-                                    #            key)].dates_observed[-1]
-                                    #print plume_archive[\
-                                    #        str(key)].centroid_lon
-                                   # print plume_archive[str(
-                                    #    key)].centroid_lat
-                                    if search_centroid_lon == plume_archive[\
+                                    if search_centroid_lon == \
+                                            plume_archive[\
                                             str(key)].centroid_lon and \
                                             search_centroid_lat ==\
                                             plume_archive[str(
@@ -344,14 +348,37 @@ def wrapper(yearmonth):
                                             plume_archive[str(
                                                 key)].dates_observed[-1] == \
                                                     search_date:
-                                    #    print 'Found it. ID is', \
-                                    #        plume_archive[str(key)].plume_id
+                                        #print 'Found it in plume archive. ' \
+                                        #      'ID is', \
+                                        #    plume_archive[str(key)].plume_id
                                         found_plume = True
-                                        # At this point, the plume should be
-                                        # appended to the original plume,
-                                        # with a plume method, then the
-                                        # plume is resurrected from plume
-                                        # archive
+
+                                        correct_plume = plume_archive[str(key)]
+                                        plume_to_append = plume
+                                        # Append the flickered plume to the
+                                        # old one which was archived
+                                        correct_plume.append_missing_plume(
+                                            plume_to_append)
+
+                                        # Add it to plume objects and remove
+                                        # it from archives
+                                        plume_objects[str(key)] = correct_plume
+                                        del plume_archive[str(key)]
+
+                                        # Add it to old IDs, replacing the
+                                        # ID of the plume which was found to be
+                                        # flickered
+                                        flicker_ids.append(plume.plume_id)
+                                        reintroduced_ids.append(key)
+                                        missing_plume = []
+
+                                        # Reintroduced plumes also get removed
+                                        # from the record of the last 50 ids
+                                        index = np.argwhere(last_50_ids
+                                                            == key)
+                                        last_50_ids = np.delete(last_50_ids,
+                                                                index)
+
                                         break
                                 # If we didn't find the plume in the plume
                                 # archive, it must still be active
@@ -365,18 +392,6 @@ def wrapper(yearmonth):
                                     plume_object_keys[::-1].sort()
                                     for key in plume_object_keys:
                                         #print 'Searching in plume objects'
-                                        #print plume_objects[ \
-                                        #    str(
-                                        #        key)].plume_id
-                                        #print plume_objects[str(
-                                        #    key)].dates_observed[
-                                        #    -1]
-                                        #print plume_objects[ \
-                                        #                str(
-                                        #            key)].centroid_lon
-                                        #print plume_objects[ \
-                                        #    str(
-                                         #       key)].centroid_lat
 
                                         if search_centroid_lon == \
                                                 plume_objects[ \
@@ -389,13 +404,49 @@ def wrapper(yearmonth):
                                                     key)].dates_observed[
                                                     -1] == \
                                                     search_date:
-                                            found_plume = True
-                                            #print 'Found it. ID is', \
-                                            #    plume_objects[
+                                            #print 'Found it in plume ' \
+                                            #      'objects. ID is', \
+                                            #    plume_archive[
                                             #        str(key)].plume_id
+
+
+                                            found_plume = True
+
+                                            correct_plume = plume_archive[
+                                                str(key)]
+                                            plume_to_append = plume
+                                            # Append the flickered plume to the
+                                            # old one which was archived
+                                            correct_plume.append_missing_plume(
+                                                plume_to_append)
+
+                                            # Add it to plume objects and
+                                            # remove it from archives
+                                            plume_objects[
+                                                str(key)] = correct_plume
+                                            del plume_archive[str(key)]
+
+                                            # Add it to old IDs, replacing the
+                                            # ID of the plume which was found
+                                            # to be flickered
+                                            flicker_ids.append(plume.plume_id)
+                                            reintroduced_ids.append(key)
+                                            missing_plume = []
+
+                                            index = np.argwhere(last_50_ids
+                                                                == key)
+                                            last_50_ids = np.delete(
+                                                last_50_ids,
+                                                index)
+
                                             break
 
                                 break
+
+                # Remove any new IDs which were actually flickers
+                for i in np.arange(0, len(flicker_ids)):
+                    index = np.argwhere(new_ids==flicker_ids[i])
+                    new_ids = np.delete(new_ids, index)
 
                 # For merged IDs, we move the tracks to pre-merge tracks
                 for i in np.arange(0, len(merge_ids)):
@@ -437,6 +488,10 @@ def wrapper(yearmonth):
                     #print plume.centroid_lon
                     #print plume.centroid_lat
                     del plume_objects[str(removed_ids[i])]
+                    last_50_ids = np.append(last_50_ids, removed_ids[i])
+
+                if len(last_50_ids) > 50:
+                    last_50_ids = last_50_ids[0:50]
 
                 if len(np.unique(sdf_plumes)) < 2:
                     sdf_previous = None
@@ -491,7 +546,7 @@ if __name__ == '__main__':
               [6, 7, 8]]
     yearmonths = zip(years, months)
 
-    #wrapper(yearmonths[6])
+    #wrapper(yearmonths[1])
 
     processes = [multiprocessing.Process(target=wrapper, args=(i,))
                  for i in yearmonths]

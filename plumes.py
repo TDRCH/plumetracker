@@ -238,8 +238,6 @@ class Plume:
         self.track_centroid_lat = []
         self.track_centroid_lon = []
         # The previous two timesteps are recorded
-        self.track_lons = []
-        self.track_lats = []
         self.track_plume_bool = []
         self.track_edges_lat = []
         self.track_edges_lon = []
@@ -253,8 +251,6 @@ class Plume:
         self.clear_LLJ = False
         self.track_speed_centroid = []
         self.in_filled = False
-        self.pre_merge_track_lons = []
-        self.pre_merge_track_lats = []
         self.pre_merge_track_centroid_lat = []
         self.pre_merge_track_centroid_lon = []
         self.pre_merge_track_area = []
@@ -308,16 +304,6 @@ class Plume:
 
         self.plume_lons = plume_lons
         self.plume_lats = plume_lats
-
-        self.track_lons.append(plume_lons)
-        self.track_lats.append(plume_lats)
-
-        # Only record the previous three timesteps (including this one)
-        if len(self.track_lons) > 3:
-            del self.track_lons[0]
-
-        if len(self.track_lats) > 3:
-            del self.track_lats[0]
 
         #print 'Centroid lat', centroid_lat
         #print 'Centroid lon', centroid_lon
@@ -594,9 +580,6 @@ class Plume:
         if len(self.dates_observed) > 0:
             self.merged = True
             self.merge_date = self.dates_observed[-1]
-
-            self.pre_merge_track_lons = self.track_lons
-            self.pre_merge_track_lats = self.track_lats
             self.pre_merge_track_centroid_lat = self.track_centroid_lat
             self.pre_merge_track_centroid_lon = self.track_centroid_lon
             self.pre_merge_track_area = self.track_area
@@ -604,8 +587,6 @@ class Plume:
             self.pre_merge_dates_observed = self.dates_observed
             self.pre_merge_track_centroid_direction = self.track_centroid_direction
 
-            self.track_lons = []
-            self.track_lats = []
             self.track_centroid_lat = []
             self.track_centroid_lon = []
             self.track_area = []
@@ -766,7 +747,6 @@ class Plume:
         else:
             smallest_distance = source_distances == np.min(source_distances)
             self.most_likely_source = dict_indices[smallest_distance][0]
-            print self.most_likely_source
 
     def update_mechanism_likelihood(self):
         ## Criteria: ##
@@ -1121,17 +1101,14 @@ class Plume:
         self.track_centroid_direction = list(np.roll(
             self.track_centroid_direction, 1))
         self.centroid_direction = self.track_centroid_direction[-1]
-        self.track_lats = list(np.roll(self.track_lats, 1))
-        self.plume_lats = self.track_lats[-1]
-        self.track_lons = list(np.roll(self.track_lons, 1))
-        self.plume_lons = self.track_lons[-1]
         self.track_centroid_lat = list(np.roll(self.track_centroid_lat, 1))
         self.track_centroid_lon = list(np.roll(self.track_centroid_lon, 1))
         self.centroid_lat = self.track_centroid_lat[-1]
         self.centroid_lon = self.track_centroid_lon[-1]
         self.track_plume_bool = list(np.roll(self.track_plume_bool, 1))
-        self.track_edges_lat = list(np.roll(self.track_edges_lat, 1))
-        self.track_edges_lon = list(np.roll(self.track_edges_lat, 1))
+        self.plume_bool = self.track_plume_bool[-1]
+        #self.track_edges_lat = list(np.roll(self.track_edges_lat, 1))
+        #self.track_edges_lon = list(np.roll(self.track_edges_lat, 1))
         self.dates_observed = list(np.roll(self.dates_observed, 1))
         self.track_area = list(np.roll(self.track_area, 1))
         self.area = self.track_area[-1]
@@ -1146,6 +1123,40 @@ class Plume:
 
         self.emission_time = self.dates_observed[0]
         self.duration = self.dates_observed[-1]-self.emission_time
+
+    def append_missing_plume(self, plume_to_append):
+        """
+        When a plume has been found to be flickered, append the new one to it
+        :return:
+        """
+
+        for i in np.arange(0, len(plume_to_append.dates_observed)):
+            self.track_centroid_direction.append(
+                plume_to_append.track_centroid_direction[i])
+            self.centroid_direction = self.track_centroid_direction[-1]
+            self.track_centroid_lat.append(
+                plume_to_append.track_centroid_lat[i])
+            self.track_centroid_lon.append(
+                plume_to_append.track_centroid_lon[i])
+            self.centroid_lat = self.track_centroid_lat[-1]
+            self.centroid_lon = self.track_centroid_lon[-1]
+            self.track_plume_bool.append(plume_to_append.track_plume_bool[i])
+            self.plume_bool = self.track_plume_bool[-1]
+            #self.track_edges_lat.append(plume_to_append.track_edges_lat[i])
+            #self.track_edges_lon.append(plume_to_append.track_edges_lon[i])
+            self.dates_observed.append(plume_to_append.dates_observed[i])
+            self.track_area.append(plume_to_append.track_area[i])
+            self.area = self.track_area[-1]
+            self.track_centroid_direction.append(
+                plume_to_append.track_centroid_direction[i])
+            self.track_primary_axis_direction.append(
+                plume_to_append.track_primary_axis_direction[i])
+            self.track_speed_centroid.append(
+                plume_to_append.track_speed_centroid[i])
+            self.speed_centroid = self.track_speed_centroid[-1]
+            self.duration = self.dates_observed[-1]-self.emission_time
+        self.plume_lats = plume_to_append.plume_lats
+        self.plume_lons = plume_to_append.plume_lons
 
 class Convection:
 
@@ -1190,16 +1201,6 @@ class Convection:
 
         self.plume_lons = cloud_lons
         self.plume_lats = cloud_lats
-
-        self.track_lons.append(cloud_lons)
-        self.track_lats.append(cloud_lats)
-
-        # Only record the previous three timesteps (including this one)
-        if len(self.track_lons) > 3:
-            del self.track_lons[0]
-
-        if len(self.track_lats) > 3:
-            del self.track_lats[0]
 
         #print 'Centroid lat', centroid_lat
         #print 'Centroid lon', centroid_lon
