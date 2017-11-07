@@ -27,9 +27,9 @@ def wrapper(yearmonth):
     day_lower = 1
     day_upper = 1
     hour_lower = 0
-    hour_upper = 10
+    hour_upper = 4
     minute_lower = 0
-    minute_upper = 0
+    minute_upper = 45
 
     time_params = np.array([year_lower, year_upper, month_lower,
                             month_upper, day_lower, day_upper,
@@ -79,7 +79,7 @@ def wrapper(yearmonth):
 
         plume_archive = shelve.open(
             '/soge-home/projects/seviri_dust/plumetracker/'
-                                    'plume_archive_flicker_v2_debug_'+str(
+                                    'plume_archive_flicker_v3_'+str(
                 yearmonth[
                                                                         0]))
 
@@ -199,8 +199,6 @@ def wrapper(yearmonth):
                     used_ids,
                     clouds)
 
-                print plume_ids
-
                 for i in np.arange(0, len(reintroduced_ids)):
                     if reintroduced_ids[i] not in plume_ids:
                         #print 'But plume '+str(reintroduced_ids[i])+' sadly ' \
@@ -243,8 +241,8 @@ def wrapper(yearmonth):
                     plume = plumes.Plume(new_ids[i], datetimes[date_i])
                     plume.update_position(lats, lons, sdf_plumes, new_ids[i])
                     plume.update_duration(datetimes[date_i])
-                    if plume.plume_id == 18:
-                        print plume.dates_observed
+                    #if plume.plume_id == 18:
+                    #    print plume.dates_observed
                     #    print plume.dates_observed
                     plume.update_bbox()
                     plume.update_majorminor_axes()
@@ -285,8 +283,8 @@ def wrapper(yearmonth):
                                                   missing_sdf_plumes,
                                                   missing_id)
                             plume.update_duration(missing_date)
-                            if plume.plume_id == 18:
-                                print plume.dates_observed
+                            #if plume.plume_id == 18:
+                            #    print plume.dates_observed
                             plume.update_bbox()
                             plume.update_majorminor_axes()
                             plume.update_area()
@@ -334,8 +332,8 @@ def wrapper(yearmonth):
                             raw_sdf_prev_prev)
 
                             if flickered:
-                                #print 'Found a flickered plume. Searching ' \
-                                #      'for the corresponding archived plume.'
+                                print 'Found a flickered plume. Searching ' \
+                                      'for the corresponding archived plume.'
                                 # We have a plume in a previous timestep
                                 # which flickered
                                 plume_archive_keys = last_50_ids.astype(int)
@@ -374,9 +372,9 @@ def wrapper(yearmonth):
                                             plume_archive[str(
                                                 key)].dates_observed[-1] == \
                                                     search_date:
-                                        #print 'Found it in plume archive. ' \
-                                        #      'ID is', \
-                                        #    plume_archive[str(key)].plume_id
+                                        print 'Found it in plume archive. ' \
+                                              'ID is', \
+                                            plume_archive[str(key)].plume_id
                                         found_plume = True
 
                                         correct_plume = plume_archive[str(key)]
@@ -470,17 +468,20 @@ def wrapper(yearmonth):
                                 break
 
 
-                # Remove any new IDs which were actually flickers
+                # Remove any IDs which were actually flickers
                 for i in np.arange(0, len(flicker_ids)):
                     index = np.argwhere(new_ids==flicker_ids[i])
                     new_ids = np.delete(new_ids, index)
-
-                print merge_ids
+                    index = np.argwhere(ids_previous == flicker_ids[i])
+                    ids_previous = np.delete(ids_previous, index)
+                    index = np.argwhere(plume_ids == flicker_ids[i])
+                    plume_ids = np.delete(plume_ids, index)
+                    del plume_objects[str(flicker_ids[i])]
 
                 # For merged IDs, we move the tracks to pre-merge tracks
-                for i in np.arange(0, len(merge_ids)):
-                    plume = plume_objects[str(merge_ids[i])]
-                    plume.merge()
+                #for i in np.arange(0, len(merge_ids)):
+                #    plume = plume_objects[str(merge_ids[i])]
+                    #plume.merge()
 
                 # For old IDs, we just run an update.
                 for i in np.arange(0, len(old_ids)):
@@ -490,8 +491,8 @@ def wrapper(yearmonth):
                     #    print plume.dates_observed
                     plume.update_position(lats, lons, sdf_plumes, old_ids[i])
                     plume.update_duration(datetimes[date_i])
-                    if plume.plume_id == 18:
-                        print plume.dates_observed
+                    #if plume.plume_id == 18:
+                    #    print plume.dates_observed
                     plume.update_bbox()
                     plume.update_majorminor_axes()
                     plume.update_area()

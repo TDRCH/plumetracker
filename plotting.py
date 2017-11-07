@@ -1214,7 +1214,7 @@ def plot_multiyear_emission_count_map(plume_archives,
         discrete_cmap = utilities.cmap_discretize(cm.Reds, 10)
         m.imshow(data_array, extent=extent, origin='lower',
                  interpolation='none',
-                 cmap=discrete_cmap, vmin=0, vmax=10)
+                 cmap=discrete_cmap, vmin=0, vmax=25)
 
         plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
         plt.tight_layout()
