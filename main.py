@@ -50,16 +50,16 @@ if __name__ == '__main__':
                                                       'time_to_09',
                                                       'duration')
 
-    year_lower = 2012
-    year_upper = 2012
+    year_lower = 2010
+    year_upper = 2010
     month_lower = 6
     month_upper = 6
     day_lower = 1
-    day_upper = 30
+    day_upper = 3
     hour_lower = 0
-    hour_upper = 23
+    hour_upper = 0
     minute_lower = 0
-    minute_upper = 45
+    minute_upper = 0
 
     time_params = np.array([year_lower, year_upper, month_lower,
                             month_upper, day_lower, day_upper,

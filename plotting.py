@@ -11,6 +11,7 @@ import matplotlib.cbook as cbook
 import matplotlib.cm as cm
 import os
 import pymc3 as pm
+from scipy import ndimage as ndi
 
 import pinkdust
 import utilities
@@ -35,7 +36,13 @@ def plot_plume_overviews(plume_archive, lats, lons):
     date_dictionary = {}
 
     for i in plume_archive:
-        dates_observed = plume_archive[i].dates_observed
+        if plume_archive[i].merged == True:
+            dates_observed = plume_archive[i].pre_merge_dates_observed
+            post_merge_dates = plume_archive[i].dates_observed
+            for j in post_merge_dates:
+                dates_observed.append(j)
+        else:
+            dates_observed = plume_archive[i].dates_observed
         for j in dates_observed:
             if j in date_dictionary:
                 date_dictionary[j].append(i)
@@ -47,7 +54,8 @@ def plot_plume_overviews(plume_archive, lats, lons):
     plots_done = 0
 
     # Then make one plot per date
-    for i in date_dictionary:
+    for i in sorted(date_dictionary.keys()):
+        print i
         print '\n\nProgress:', str(np.round((float(plots_done)/float(
             total_dates))*100, 2))+'%\n\n'
         plume_data = np.zeros((lats.shape[0], lons.shape[1]))
@@ -60,7 +68,19 @@ def plot_plume_overviews(plume_archive, lats, lons):
 
         for j in active_plumes:
 
-            dates_observed = plume_archive[j].dates_observed
+            print j
+
+            if plume_archive[j].merged == True:
+                dates_observed = plume_archive[j].pre_merge_dates_observed
+                post_merge_dates = plume_archive[j].dates_observed
+                for k in post_merge_dates:
+                    dates_observed.append(k)
+            else:
+                dates_observed = plume_archive[j].dates_observed
+
+            if j == '18':
+                print dates_observed
+
             date_bool = np.asarray(dates_observed) == i
 
             plume_bools = np.asarray(plume_archive[j].track_plume_bool)
@@ -69,10 +89,7 @@ def plot_plume_overviews(plume_archive, lats, lons):
 
             plume_bool = plume_bool[0].toarray()
 
-            if plume_archive[j].clear_LLJ:
-                plume_data[plume_bool] = 2
-            else:
-                plume_data[plume_bool] = 1
+            plume_data[plume_bool] = 1
 
             track_centroid_lats = plume_archive[j].track_centroid_lat
             track_centroid_lons = plume_archive[j].track_centroid_lon
@@ -98,10 +115,7 @@ def plot_plume_overviews(plume_archive, lats, lons):
 
         centroid_x, centroid_y = m(centroid_lons, centroid_lats)
 
-        levels = [1, 2]
-
-        contourplot = m.contourf(lons, lats, plume_data, levels, colors=(
-            'r', 'g'))
+        contourplot = m.contourf(lons, lats, plume_data)
         centroidplot = m.scatter(centroid_x, centroid_y, s=1)
 
         anns = []
@@ -213,6 +227,137 @@ def plot_existing_SDF():
             print str(item)[:-3]
             for coll in c.collections:
                 plt.gca().collections.remove(coll)
+
+def plot_SDF_overviews(datetimes, lats=None, lons=None):
+    """
+    Plots raw SDF, without 250 pixel filtering, for comparison with plume plots
+    :param datetimes:
+    :return:
+    """
+
+    datestrings = [j.strftime("%Y%m%d%H%M") for j in datetimes]
+
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0],
+                urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    for date_i in np.arange(0, len(datetimes)):
+        print datetimes[date_i]
+        try:
+            sdf = Dataset(
+                '/soge-home/data_not_backed_up/satellite/meteosat/seviri/'
+                '15-min/0.03x0.03/sdf/nc/' +
+                datetimes[date_i].strftime("%B").upper(
+                ) + str(datetimes[date_i].year) + '/SDF_v2/SDF_v2.' + \
+                datestrings[date_i] + '.nc')
+
+            if 'time' in sdf.variables:
+                sdf_now = sdf.variables['bt108'][0]
+            else:
+                sdf_now = sdf.variables['bt108'][:]
+
+            if lats == None:
+                if 'latitude' in sdf.variables:
+                    lats = sdf.variables['latitude'][:]
+                    lons = sdf.variables['longitude'][:]
+                else:
+                    raise ValueError('No lat/lon variable - please specify '
+                                     'lats and lons')
+
+            title = 'SDF_overview_map_'+datestrings[date_i]+'.png'
+
+            # m.contourf(lons, lats, data_array)
+            SDF_img = m.imshow(sdf_now, extent=extent, origin='lower',
+                     interpolation='none')
+
+            plt.tight_layout()
+            plt.savefig(title, bbox_inches='tight')
+
+            SDF_img.remove()
+
+            plt.close()
+
+        except:
+            'No SDF data found for', datestrings[date_i]
+
+def plot_SDF_250px_overviews(datetimes, lats=None, lons=None):
+    """
+    Plots raw SDF, without 250 pixel filtering, for comparison with plume plots
+    :param datetimes:
+    :return:
+    """
+
+    datestrings = [j.strftime("%Y%m%d%H%M") for j in datetimes]
+
+    sdf = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri/'
+        '15-min/0.03x0.03/sdf/nc/' +
+        datetimes[0].strftime("%B").upper(
+        ) + str(datetimes[0].year) + '/SDF_v2/SDF_v2.' + \
+        datestrings[0] + '.nc')
+
+    if lats == None:
+        if 'latitude' in sdf.variables:
+            lats = sdf.variables['latitude'][:]
+            lons = sdf.variables['longitude'][:]
+        else:
+            raise ValueError(
+                'No lat/lon variable - please specify '
+                'lats and lons')
+
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0],
+                urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    for date_i in np.arange(0, len(datetimes)):
+        print datetimes[date_i]
+        try:
+            sdf = Dataset(
+                '/soge-home/data_not_backed_up/satellite/meteosat/seviri/'
+                '15-min/0.03x0.03/sdf/nc/' +
+                datetimes[date_i].strftime("%B").upper(
+                ) + str(datetimes[date_i].year) + '/SDF_v2/SDF_v2.' + \
+                datestrings[date_i] + '.nc')
+
+            if 'time' in sdf.variables:
+                sdf_now = sdf.variables['bt108'][0]
+            else:
+                sdf_now = sdf.variables['bt108'][:]
+
+            label_objects, nb_labels = ndi.label(sdf_now)
+            sizes = np.bincount(label_objects.ravel())
+
+            # Set clusters smaller than size 250 to zero
+            mask_sizes = sizes > 250
+            mask_sizes[0] = 0
+            sdf_now = mask_sizes[label_objects]
+
+            title = 'SDF_overview_map_' + datestrings[date_i] + '_250px.png'
+
+            # m.contourf(lons, lats, data_array)
+            SDF_img = m.imshow(sdf_now, extent=extent, origin='lower',
+                               interpolation='none')
+
+            plt.tight_layout()
+            plt.savefig(title, bbox_inches='tight')
+
+            SDF_img.remove()
+
+            plt.close()
+
+        except:
+            'No SDF data found for', datestrings[date_i]
+
 
 # Function to plot active plume number through time
 def plot_plume_count(plume_archive, min_lat=None, min_lon=None,
@@ -1038,7 +1183,7 @@ def plot_multiyear_emission_count_map(plume_archives,
                             lats, lons, title='plume_count_map_multiyear.png',
                                       res=500,
                             min_lat=None, min_lon=None,
-                             max_lat=None, max_lon=None):
+                             max_lat=None, max_lon=None, pre_calculated=False):
     """
     Plots a map of emission count, akin to Ashpole and Washington (2012)
     key figure (to be updated to frequency)
@@ -1052,83 +1197,110 @@ def plot_multiyear_emission_count_map(plume_archives,
     :return:
     """
 
-    plt.close()
+    if pre_calculated:
+        plt.close()
+        fig, ax = plt.subplots()
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
 
-    fig, ax = plt.subplots()
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
 
-    latlon_dictionary = {}
+        data_array = np.load('multiyear_dust_frequency_array.npy')
 
-    lats = np.linspace(np.min(lats), np.max(lats), res)
-    lons = np.linspace(np.min(lons), np.max(lons), res)
-    lons, lats = np.meshgrid(lons, lats)
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.Reds, 10)
+        m.imshow(data_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap, vmin=0, vmax=10)
 
-    # Get your zip grid of latlon coordinates
-    latlon_zip = np.array(zip(lats.ravel(), lons.ravel()), dtype=('f8,'
-                                                                  'f8')). \
-        reshape(
-        lats.shape)
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
 
-    latlon_zip = latlon_zip.flatten()
+        plt.close()
 
-    for plume_archive in plume_archives:
+    else:
 
-        for i in plume_archive:
-            # If the plume has merged, the plume source is found in the
-            # pre-merge track
-            if plume_archive[i].merged == True:
-                emission_lat = plume_archive[i].pre_merge_track_centroid_lat[0]
-                emission_lon = plume_archive[i].pre_merge_track_centroid_lon[0]
-            else:
-                emission_lat = plume_archive[i].track_centroid_lat[0]
-                emission_lon = plume_archive[i].track_centroid_lon[0]
+        plt.close()
 
-            nearest = min(latlon_zip, key=lambda x: utilities.
-                          haversine(x[1],
-                          x[0],
-                          emission_lon,
-                          emission_lat))
+        fig, ax = plt.subplots()
 
-            # If this entry already exists in the dictionary we just add to it
-            if (nearest[0], nearest[1]) in latlon_dictionary:
-                latlon_dictionary[(nearest[0], nearest[1])] += 1
-            else:
-                latlon_dictionary[(nearest[0], nearest[1])] = 0
-                latlon_dictionary[(nearest[0], nearest[1])] += 1
+        latlon_dictionary = {}
 
-    # Data array
-    data_array = np.zeros((lons.shape))
+        lats = np.linspace(np.min(lats), np.max(lats), res)
+        lons = np.linspace(np.min(lons), np.max(lons), res)
+        lons, lats = np.meshgrid(lons, lats)
 
-    # Find the nearest latlon for each dictionary key, and extract the index
-    # for it
+        # Get your zip grid of latlon coordinates
+        latlon_zip = np.array(zip(lats.ravel(), lons.ravel()), dtype=('f8,'
+                                                                      'f8')). \
+            reshape(
+            lats.shape)
 
-    for i in latlon_dictionary:
-        lat_bool = lats == i[0]
-        lon_bool = lons == i[1]
-        union_bool = lat_bool & lon_bool
-        data_array[union_bool] = latlon_dictionary[i]
+        latlon_zip = latlon_zip.flatten()
 
-    data_array[data_array == 0] = np.nan
+        for plume_archive in plume_archives:
 
-    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
-    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
-                llcrnrlat=extent[2], urcrnrlat=extent[3],
-                resolution='i')
+            for i in plume_archive:
+                # If the plume has merged, the plume source is found in the
+                # pre-merge track
+                if plume_archive[i].merged == True:
+                    emission_lat = plume_archive[i].pre_merge_track_centroid_lat[0]
+                    emission_lon = plume_archive[i].pre_merge_track_centroid_lon[0]
+                else:
+                    emission_lat = plume_archive[i].track_centroid_lat[0]
+                    emission_lon = plume_archive[i].track_centroid_lon[0]
 
-    m.drawcoastlines(linewidth=0.5)
-    m.drawcountries(linewidth=0.5)
+                nearest = min(latlon_zip, key=lambda x: utilities.
+                              haversine(x[1],
+                              x[0],
+                              emission_lon,
+                              emission_lat))
 
-    # m.contourf(lons, lats, data_array)
-    discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
-    m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
-             cmap=discrete_cmap, vmin=0, vmax=25)
+                # If this entry already exists in the dictionary we just add to it
+                if (nearest[0], nearest[1]) in latlon_dictionary:
+                    latlon_dictionary[(nearest[0], nearest[1])] += 1
+                else:
+                    latlon_dictionary[(nearest[0], nearest[1])] = 0
+                    latlon_dictionary[(nearest[0], nearest[1])] += 1
 
-    plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
-    plt.tight_layout()
-    plt.savefig(title, bbox_inches='tight')
+        # Data array
+        data_array = np.zeros((lons.shape))
 
-    plt.close()
+        # Find the nearest latlon for each dictionary key, and extract the index
+        # for it
 
-    np.save('multiyear_dust_frequency_array', data_array)
+        for i in latlon_dictionary:
+            lat_bool = lats == i[0]
+            lon_bool = lons == i[1]
+            union_bool = lat_bool & lon_bool
+            data_array[union_bool] = latlon_dictionary[i]
+
+        data_array[data_array == 0] = np.nan
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+        m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
+                 cmap=discrete_cmap, vmin=0, vmax=25)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+        np.save('multiyear_dust_frequency_array', data_array)
 
 def plot_plume_tracks(plume_archive, lats, lons, min_lat=None,
                             min_lon=None,

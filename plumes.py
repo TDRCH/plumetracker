@@ -564,8 +564,13 @@ class Plume:
                                    self.dates_observed[
                 -2]).seconds
 
-            self.speed_centroid = (centroid_distance*1000/secs_since_previous)
-            self.track_speed_centroid.append(self.speed_centroid)
+            if secs_since_previous == 0:
+                print 'WARNING: Found a timestep value of zero seconds at',
+                self.dates_observed[-1]
+                self.track_speed_centroid.append(np.nan)
+            else:
+                self.speed_centroid = (centroid_distance*1000/secs_since_previous)
+                self.track_speed_centroid.append(self.speed_centroid)
         #print 'Plume', self.plume_id
         #print 'Centroid speed', self.speed_centroid
         #print 'Mean centroid speed', np.nanmean(self.track_speed_centroid)
@@ -1041,7 +1046,7 @@ class Plume:
         """
 
         if len(raw_sdf_prev) > 0:
-            plume_bool = self.plume_bool.toarray()
+            plume_bool = self.track_plume_bool[0].toarray()
             # Only proceed if we have more than one pixel activated
             plumes_prev = deepcopy(raw_sdf_prev)
             label_objects, nb_labels = ndi.label(plumes_prev)
