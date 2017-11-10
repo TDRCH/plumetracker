@@ -12,6 +12,8 @@ import matplotlib.cm as cm
 import os
 import pymc3 as pm
 from scipy import ndimage as ndi
+import cmocean
+from matplotlib import colors
 
 import pinkdust
 import utilities
@@ -78,9 +80,6 @@ def plot_plume_overviews(plume_archive, lats, lons):
             else:
                 dates_observed = plume_archive[j].dates_observed
 
-            if j == '18':
-                print dates_observed
-
             date_bool = np.asarray(dates_observed) == i
 
             plume_bools = np.asarray(plume_archive[j].track_plume_bool)
@@ -89,7 +88,7 @@ def plot_plume_overviews(plume_archive, lats, lons):
 
             plume_bool = plume_bool[0].toarray()
 
-            plume_data[plume_bool] = 1
+            plume_data[plume_bool] = plume_archive[j].LLJ_prob
 
             track_centroid_lats = plume_archive[j].track_centroid_lat
             track_centroid_lons = plume_archive[j].track_centroid_lon
@@ -115,7 +114,8 @@ def plot_plume_overviews(plume_archive, lats, lons):
 
         centroid_x, centroid_y = m(centroid_lons, centroid_lats)
 
-        contourplot = m.contourf(lons, lats, plume_data)
+        levels = np.arange(0, 1.1, 0.1)
+        contourplot = m.contourf(lons, lats, plume_data, levels=levels)
         centroidplot = m.scatter(centroid_x, centroid_y, s=1)
 
         anns = []
@@ -125,7 +125,7 @@ def plot_plume_overviews(plume_archive, lats, lons):
                 label_i]), fontsize=8)
             anns.append(ann)
 
-        plt.savefig('Plume_flickertest_overview_'+i.strftime(
+        plt.savefig('Plume_flickerv3_overview_prob_'+i.strftime(
             "%Y%m%d%H%M")+'.png')
 
         centroidplot.remove()
@@ -1037,6 +1037,9 @@ def plot_llj_prob_map(plume_archive, lats, lons, min_lat=None,
         emission_lon = plume_archive[i].track_centroid_lon[0]
         llj_prob = plume_archive[i].LLJ_prob
 
+        if plume_archive[i].LLJ_prob == None:
+            continue
+
         nearest = min(latlon_zip, key=lambda x: utilities.
                       haversine(x[1],
                                 x[0],
@@ -1077,14 +1080,162 @@ def plot_llj_prob_map(plume_archive, lats, lons, min_lat=None,
 
     m.drawcoastlines(linewidth=0.5)
     m.drawcountries(linewidth=0.5)
+    parallels = np.arange(10., 40, 2.)
+    # labels = [left,right,top,bottom]
+    m.drawparallels(parallels, labels=[False, True, True, False],
+                    linewidth=0.5)
+    meridians = np.arange(-20., 17., 2.)
+    m.drawmeridians(meridians, labels=[True, False, False, True],
+                    linewidth=0.5)
 
     #m.contourf(lons, lats, data_array)
-    discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+    discrete_cmap = utilities.cmap_discretize(cm.YlGnBu, 7)
     m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
-             cmap=discrete_cmap)
-    plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
+             cmap=discrete_cmap, vmin=0.3, vmax=1)
+
+    ticks = np.arange(0.3, 1.1, 0.1)
+    plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06,
+                 ticks=ticks)
     plt.tight_layout()
-    plt.savefig('LLJ_prob_map.png', bbox_inches='tight')
+    plt.savefig('LLJ_prob_map_2010.png', bbox_inches='tight')
+
+    np.save('prob_array_2010', data_array)
+
+    plt.close()
+
+def plot_multiyear_llj_prob_map_wzeros(plume_archives, lats, lons,
+                                       min_lat=None, min_lon=None,
+                                       max_lat=None, max_lon=None,
+                                       total_timesteps=61824,
+                                       title='LLJ_prob_map_total_wzeros.png',
+                                       pre_calculated = False):
+
+    if pre_calculated:
+        plt.close()
+        fig, ax = plt.subplots()
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 2.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        data_array = np.load('prob_array_total_wzeros.npy')
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlGnBu, 10)
+        m.imshow(data_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap, vmin=0.3, vmax=1.0)
+
+        ticks = np.arange(0.3, 1.1, 0.1)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06,
+                     ticks=ticks)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+    plt.close()
+
+    fig, ax = plt.subplots()
+
+    latlon_dictionary = {}
+
+    lats = np.linspace(np.min(lats), np.max(lats), 100)
+    lons = np.linspace(np.min(lons), np.max(lons), 100)
+
+    lons, lats = np.meshgrid(lons, lats)
+
+    # Get your zip grid of latlon coordinates
+    latlon_zip = np.array(zip(lats.ravel(), lons.ravel()),
+                          dtype=('f8,'
+                                 'f8')).reshape(lats.shape)
+
+    latlon_zip = latlon_zip.flatten()
+
+    # Data array
+    data_array = np.zeros((lons.shape))
+
+    archive_idx = 1
+
+    for plume_archive in plume_archives:
+        print 'Plume archive', archive_idx
+        archive_idx += 1
+        archive_size = len(plume_archive)
+        plume_idx = 1
+        used_percentages = []
+        for i in plume_archive:
+            if int((float(plume_idx) / float(
+                    archive_size)) * 100) % 10 == 0 and int((float(
+                plume_idx) / float(archive_size)) * 100) not in \
+                    used_percentages:
+                print str(int((float(plume_idx) / float(
+                    archive_size)) * 100)) + "%"
+                # This percentage has been printed already
+                used_percentages.append(int((float(plume_idx) / float(
+                    archive_size)) * 100))
+            plume_idx += 1
+            # If the plume has merged, the plume source is found in the
+            # pre-merge track
+
+            emission_lat = plume_archive[i].track_centroid_lat[0]
+            emission_lon = plume_archive[i].track_centroid_lon[0]
+            llj_prob = plume_archive[i].LLJ_prob
+
+            if plume_archive[i].LLJ_prob == None:
+                continue
+
+            nearest = min(latlon_zip, key=lambda x: utilities.
+                          haversine(x[1],
+                                    x[0],
+                                    emission_lon,
+                                    emission_lat))
+
+            lat_bool = lats == nearest[0]
+            lon_bool = lons == nearest[1]
+            union_bool = lat_bool & lon_bool
+
+            data_array[union_bool] += np.nanmean(llj_prob)
+
+    data_array = data_array/total_timesteps
+
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+    parallels = np.arange(10., 40, 2.)
+    # labels = [left,right,top,bottom]
+    m.drawparallels(parallels, labels=[False, True, True, False],
+                    linewidth=0.5)
+    meridians = np.arange(-20., 17., 2.)
+    m.drawmeridians(meridians, labels=[True, False, False, True],
+                    linewidth=0.5)
+
+    #m.contourf(lons, lats, data_array)
+    discrete_cmap = utilities.cmap_discretize(cm.YlGnBu, 7)
+    m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
+             cmap=discrete_cmap)#, vmin=0.3, vmax=1)
+
+    #ticks = np.arange(0.3, 1.1, 0.1)
+    plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)#,
+                 #ticks=ticks)
+    plt.tight_layout()
+    plt.savefig('LLJ_prob_map_total_wzeros.png', bbox_inches='tight')
+
+    np.save('prob_array_total_wzeros', data_array)
 
     plt.close()
 
@@ -1168,6 +1319,7 @@ def plot_emission_count_map(plume_archive,
     m.drawcoastlines(linewidth=0.5)
     m.drawcountries(linewidth=0.5)
 
+
     # m.contourf(lons, lats, data_array)
     discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
     m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
@@ -1207,16 +1359,26 @@ def plot_multiyear_emission_count_map(plume_archives,
 
         m.drawcoastlines(linewidth=0.5)
         m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 2.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
 
-        data_array = np.load('multiyear_dust_frequency_array.npy')
+        data_array = np.load('multiyear_dust_frequency_array_v3.npy')
 
         # m.contourf(lons, lats, data_array)
-        discrete_cmap = utilities.cmap_discretize(cm.Reds, 10)
+        discrete_cmap = utilities.cmap_discretize(cm.YlGnBu, 10)
         m.imshow(data_array, extent=extent, origin='lower',
                  interpolation='none',
-                 cmap=discrete_cmap, vmin=0, vmax=25)
+                 cmap=discrete_cmap, vmin=0.3, vmax=1.0)
 
-        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
+        ticks = np.arange(0.3, 1.1, 0.1)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06,
+                     ticks=ticks)
         plt.tight_layout()
         plt.savefig(title, bbox_inches='tight')
 
@@ -1293,6 +1455,539 @@ def plot_multiyear_emission_count_map(plume_archives,
         discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
         m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
                  cmap=discrete_cmap, vmin=0, vmax=25)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+        np.save('multiyear_dust_frequency_array', data_array)
+
+def plot_multiyear_emission_count_map_2(plume_archives,
+                            lats, lons, title='plume_count_map_multiyear.png',
+                                      res=200,
+                            min_lat=None, min_lon=None,
+                             max_lat=None, max_lon=None, pre_calculated=False):
+    """
+    Plots a map of emission count, akin to Ashpole and Washington (2012)
+    key figure (to be updated to frequency)
+    :param plume_archive:
+    :param lats:
+    :param lons:
+    :param min_lat:
+    :param min_lon:
+    :param max_lat:
+    :param max_lon:
+    :return:
+    """
+
+    if pre_calculated:
+        plt.close()
+        fig, ax = plt.subplots()
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 2.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        lats = np.linspace(np.min(lats), np.max(lats), res)
+        lons = np.linspace(np.min(lons), np.max(lons), res)
+        lons, lats = np.meshgrid(lons, lats)
+        data_array = np.load('prob_array_total.npy')
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlGnBu, 7)
+        #bounds = np.arange(0.3, 1.1, 0.1)
+        #norm = colors.BoundaryNorm(bounds, discrete_cmap)
+        m.imshow(data_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap, vmin=0.3, vmax=1)
+        vmin = 0.0
+        vmax = 40.0
+        step = vmax/10
+        levels = np.arange(vmin, vmax, step)
+        #m.contourf(lons, lats, data_array, cmap=cm.YlOrBr, levels=levels)
+        print 'hello'
+        #m.contourf(lons, lats, data_array, cmap=cmocean.cm.solar,
+        #           levels=levels)
+
+        ticks = np.arange(0.3, 1.1, 0.1)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06,
+                     ticks=ticks)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+    else:
+
+        plt.close()
+
+        fig, ax = plt.subplots()
+
+        sourced_array = np.zeros((lons.shape))
+
+        latlon_dictionary = {}
+
+        lats = np.linspace(np.min(lats), np.max(lats), res)
+        lons = np.linspace(np.min(lons), np.max(lons), res)
+        lons, lats = np.meshgrid(lons, lats)
+
+        archive_idx = 1
+
+        # Data array
+        data_array = np.zeros((lons.shape))
+
+        for plume_archive in plume_archives:
+            print 'Plume archive', archive_idx
+            archive_idx += 1
+            archive_size = len(plume_archive)
+            plume_idx = 1
+            used_percentages = []
+            for i in plume_archive:
+                if int((float(plume_idx)/float(
+                    archive_size))*100)%10 == 0 and int((float(
+                    plume_idx)/float(archive_size))*100) not in \
+                        used_percentages:
+                    print str(int((float(plume_idx)/float(
+                    archive_size))*100))+"%"
+                    # This percentage has been printed already
+                    used_percentages.append(int((float(plume_idx)/float(
+                    archive_size))*100))
+                plume_idx += 1
+                # If the plume has merged, the plume source is found in the
+                # pre-merge track
+                if plume_archive[i].merged == True:
+                    emission_lat = np.round(plume_archive[
+                        i].pre_merge_track_centroid_lat[0], 1)
+                    emission_lon = np.round(plume_archive[
+                        i].pre_merge_track_centroid_lon[0], 1)
+                else:
+                    emission_lat = np.round(plume_archive[
+                        i].track_centroid_lat[0], 1)
+                    emission_lon = np.round(plume_archive[
+                        i].track_centroid_lon[0], 1)
+
+                lat_diff = np.abs(lats-emission_lat)
+                lon_diff = np.abs(lons-emission_lon)
+                lat_bool = lat_diff == lat_diff.min()
+                lon_bool = lon_diff == lon_diff.min()
+                if np.round(lats[lat_bool][0], 0) == 24 and np.round(lons[
+                    lon_bool][0], 0) == -5:
+                    print 'Found source D emission'
+                    emission_bool = plume_archive[i].track_plume_bool[0]
+                    emission_bool = emission_bool.toarray()
+                    sourced_array[emission_bool] += 1
+                union_bool = lat_bool & lon_bool
+                data_array[union_bool] += 1
+
+                """
+
+                # If this entry already exists in the dictionary we just add to it
+                if (emission_lat, emission_lon) in latlon_dictionary:
+                    latlon_dictionary[(emission_lat, emission_lon)] += 1
+                else:
+                    latlon_dictionary[(emission_lat, emission_lon)] = 0
+                    latlon_dictionary[(emission_lat, emission_lon)] += 1
+
+                """
+
+        # Find the nearest latlon for each dictionary key, and extract the index
+        # for it
+
+        """
+
+        ll_dict_idx = 1
+        for i in latlon_dictionary:
+            print float(ll_dict_idx)/float(len(latlon_dictionary))
+            ll_dict_idx += 1
+            # HERE YOU NEED TO BE LOOKING FOR THE NEAREST ONE, NOT THE EXACT
+            #  EQUAL - ALSO HOLY HELL THIS IS GONNA TAKE A LONG TIME
+            lat_diff = np.abs(lats-i[0])
+            lon_diff = np.abs(lons-i[1])
+            lat_bool = lat_diff == lat_diff.min()
+            lon_bool = lon_diff == lon_diff.min()
+            #lat_bool = np.round(lats, 2) == i[0]
+            #lon_bool = np.round(lons, 2) == i[1]
+            union_bool = lat_bool & lon_bool
+            data_array[union_bool] = latlon_dictionary[i]
+
+        """
+
+        data_array[data_array == 0] = np.nan
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 2.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
+                 cmap=discrete_cmap, vmin=0, vmax=40)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+        np.save('multiyear_dust_frequency_array', data_array)
+        np.save('sourced_array', sourced_array)
+
+def plot_multiyear_emission_area_map(plume_archives,
+                            lats, lons, title='plume_area_map_multiyear.png',
+                                      res=200,
+                            min_lat=None, min_lon=None,
+                             max_lat=None, max_lon=None, pre_calculated=False):
+    """
+    Plots a map of emission count, akin to Ashpole and Washington (2012)
+    key figure (to be updated to frequency)
+    :param plume_archive:
+    :param lats:
+    :param lons:
+    :param min_lat:
+    :param min_lon:
+    :param max_lat:
+    :param max_lon:
+    :return:
+    """
+
+    if pre_calculated:
+        plt.close()
+        fig, ax = plt.subplots()
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 2.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        lats = np.linspace(np.min(lats), np.max(lats), res)
+        lons = np.linspace(np.min(lons), np.max(lons), res)
+        lons, lats = np.meshgrid(lons, lats)
+        data_array = np.load('multiyear_dust_frequency_array_v3.npy')
+        area_data_array = np.load('multiyear_dust_area_array.npy')
+        area_data_array[area_data_array > 1000000000] = np.nan
+        print np.max(area_data_array[np.isfinite(area_data_array)])
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(area_data_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap)
+        vmin = 0.0
+        vmax = 40.0
+        step = vmax/10
+        levels = np.arange(vmin, vmax, step)
+        #m.contourf(lons, lats, data_array, cmap=cm.YlOrBr, levels=levels)
+        print 'hello'
+        #m.contourf(lons, lats, data_array, cmap=cmocean.cm.solar,
+        #           levels=levels)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+    else:
+
+        plt.close()
+
+        fig, ax = plt.subplots()
+
+        latlon_dictionary = {}
+
+        lats = np.linspace(np.min(lats), np.max(lats), res)
+        lons = np.linspace(np.min(lons), np.max(lons), res)
+        lons, lats = np.meshgrid(lons, lats)
+
+        archive_idx = 1
+
+        # Data array
+        data_array = np.zeros((lons.shape))
+        area_data_array = np.zeros((lons.shape))
+
+        for plume_archive in plume_archives:
+            print 'Plume archive', archive_idx
+            archive_idx += 1
+            archive_size = len(plume_archive)
+            plume_idx = 1
+            used_percentages = []
+            for i in plume_archive:
+                if int((float(plume_idx)/float(
+                    archive_size))*100)%10 == 0 and int((float(
+                    plume_idx)/float(archive_size))*100) not in \
+                        used_percentages:
+                    print str(int((float(plume_idx)/float(
+                    archive_size))*100))+"%"
+                    # This percentage has been printed already
+                    used_percentages.append(int((float(plume_idx)/float(
+                    archive_size))*100))
+                plume_idx += 1
+                # If the plume has merged, the plume source is found in the
+                # pre-merge track
+                if plume_archive[i].merged == True:
+                    emission_lat = np.round(plume_archive[
+                        i].pre_merge_track_centroid_lat[0], 1)
+                    emission_lon = np.round(plume_archive[
+                        i].pre_merge_track_centroid_lon[0], 1)
+                else:
+                    emission_lat = np.round(plume_archive[
+                        i].track_centroid_lat[0], 1)
+                    emission_lon = np.round(plume_archive[
+                        i].track_centroid_lon[0], 1)
+                    emission_area = plume_archive[i].track_area[0]
+
+                lat_diff = np.abs(lats-emission_lat)
+                lon_diff = np.abs(lons-emission_lon)
+                lat_bool = lat_diff == lat_diff.min()
+                lon_bool = lon_diff == lon_diff.min()
+                union_bool = lat_bool & lon_bool
+                data_array[union_bool] += 1
+                area_data_array[union_bool] += emission_area
+
+                """
+
+                # If this entry already exists in the dictionary we just add to it
+                if (emission_lat, emission_lon) in latlon_dictionary:
+                    latlon_dictionary[(emission_lat, emission_lon)] += 1
+                else:
+                    latlon_dictionary[(emission_lat, emission_lon)] = 0
+                    latlon_dictionary[(emission_lat, emission_lon)] += 1
+
+                """
+
+        # Find the nearest latlon for each dictionary key, and extract the index
+        # for it
+
+        """
+
+        ll_dict_idx = 1
+        for i in latlon_dictionary:
+            print float(ll_dict_idx)/float(len(latlon_dictionary))
+            ll_dict_idx += 1
+            # HERE YOU NEED TO BE LOOKING FOR THE NEAREST ONE, NOT THE EXACT
+            #  EQUAL - ALSO HOLY HELL THIS IS GONNA TAKE A LONG TIME
+            lat_diff = np.abs(lats-i[0])
+            lon_diff = np.abs(lons-i[1])
+            lat_bool = lat_diff == lat_diff.min()
+            lon_bool = lon_diff == lon_diff.min()
+            #lat_bool = np.round(lats, 2) == i[0]
+            #lon_bool = np.round(lons, 2) == i[1]
+            union_bool = lat_bool & lon_bool
+            data_array[union_bool] = latlon_dictionary[i]
+
+        """
+
+        data_array[data_array == 0] = np.nan
+        area_data_array = area_data_array/data_array
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 2.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(area_data_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+        np.save('multiyear_dust_frequency_array', data_array)
+        np.save('multiyear_dust_area_array', area_data_array)
+
+
+def plot_multiyear_emission_count_map_3(plume_archives,
+                                        lats, lons,
+                                        title='plume_count_map_multiyear.png',
+                                        res=200,
+                                        min_lat=None, min_lon=None,
+                                        max_lat=None, max_lon=None,
+                                        pre_calculated=False):
+    """
+    Plots a map of emission count, akin to Ashpole and Washington (2012)
+    key figure (to be updated to frequency)
+    :param plume_archive:
+    :param lats:
+    :param lons:
+    :param min_lat:
+    :param min_lon:
+    :param max_lat:
+    :param max_lon:
+    :return:
+    """
+
+    if pre_calculated:
+        plt.close()
+        fig, ax = plt.subplots()
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 2.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        #lats = np.linspace(np.min(lats), np.max(lats), res)
+        #lons = np.linspace(np.min(lons), np.max(lons), res)
+        #lons, lats = np.meshgrid(lons, lats)
+        data_array = np.load('sourced_array.npy')
+        #data_array[data_array < 5] = np.nan
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(data_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap, vmin=0, vmax=15)
+        vmin = 0.0
+        vmax = 40.0
+        step = vmax / 10
+        levels = np.arange(vmin, vmax, step)
+        # m.contourf(lons, lats, data_array, cmap=cm.YlOrBr, levels=levels)
+        # m.contourf(lons, lats, data_array, cmap=cmocean.cm.solar,
+        #           levels=levels)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06,
+                     extend='both')
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+    else:
+
+        plt.close()
+
+        fig, ax = plt.subplots()
+
+        latlon_dictionary = {}
+
+        #lats = np.linspace(np.min(lats), np.max(lats), res)
+        #lons = np.linspace(np.min(lons), np.max(lons), res)
+        #lons, lats = np.meshgrid(lons, lats)
+
+        archive_idx = 1
+
+        # Data array
+        data_array = np.zeros((lons.shape))
+
+        for plume_archive in plume_archives:
+            print 'Plume archive', archive_idx
+            archive_idx += 1
+            archive_size = len(plume_archive)
+            plume_idx = 1
+            used_percentages = []
+            for i in plume_archive:
+                if int((float(plume_idx) / float(
+                        archive_size)) * 100) % 10 == 0 and int((float(
+                    plume_idx) / float(archive_size)) * 100) not in \
+                        used_percentages:
+                    print str(int((float(plume_idx) / float(
+                        archive_size)) * 100)) + "%"
+                    # This percentage has been printed already
+                    used_percentages.append(int((float(plume_idx) / float(
+                        archive_size)) * 100))
+                plume_idx += 1
+                # If the plume has merged, the plume source is found in the
+                # pre-merge track
+                if plume_archive[i].merged == True:
+                    emission_lat = np.round(plume_archive[
+                                                i].pre_merge_track_centroid_lat[
+                                                0], 1)
+                    emission_lon = np.round(plume_archive[
+                                                i].pre_merge_track_centroid_lon[
+                                                0], 1)
+                else:
+
+                    emission_bool = plume_archive[i].track_plume_bool[0]
+                    emission_bool = emission_bool.toarray()
+
+                    em_lats = np.round(lats[emission_bool], 0)
+                    em_lons = np.round(lons[emission_bool], 0)
+
+                    if np.any(em_lats == 26) and (np.any(em_lons == 1) or
+                                                      np.any(em_lons == 2)):
+                        print 'Found a Tidihelt'
+                        print data_array[emission_bool]
+
+                    data_array[emission_bool] += 1
+
+        print np.unique(data_array)
+
+        data_array[data_array == 0] = np.nan
+        data_array[data_array < 5] = np.nan
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(15., 37, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False])
+        meridians = np.arange(-17., 15., 2.)
+        m.drawmeridians(meridians, labels=[True, False, False, True])
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(data_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap, vmin=0, vmax=40)
 
         plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
         plt.tight_layout()

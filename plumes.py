@@ -46,10 +46,15 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
         #sdf_now, infilled = plume_infilling(sdf_now, clouds)
 
         sdf_clusters, num = measurements.label(sdf_now)
+        if len(used_ids) > 0:
+            # Increase the plume_ID so that they are all new
+            old_id_max = np.max(used_ids)
+            sdf_clusters[sdf_clusters != 0] += old_id_max
         plume_ids = np.unique(sdf_clusters)
         large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
         #print large_plume_ids
         new_ids = large_plume_ids
+
     else:
         label_objects, nb_labels = ndi.label(sdf_now)
         sizes = np.bincount(label_objects.ravel())
@@ -1162,6 +1167,56 @@ class Plume:
             self.duration = self.dates_observed[-1]-self.emission_time
         self.plume_lats = plume_to_append.plume_lats
         self.plume_lons = plume_to_append.plume_lons
+
+    def flag_dust_associated_convection(self, new_clouds, prev_dust_assoc):
+        """
+        From an array of clouds with unique IDs associated with each
+        separate object, identifies IDs of new clouds which either overlap
+        with this plume in the previous timestep, or which are directly
+        adjacent to this plume in the current timestep
+        :param clouds:
+        :return:
+        """
+
+        prev_dust_assoc = prev_dust_assoc == 1
+
+        # First, check for an overlap with the previous timestep's dust
+        # Take the previous plume bool, and simply bool out any new cloud.
+        # Store all IDs which are associated with this plume and return them.
+        previous_plume_bool = self.track_plume_bool[-2]
+        previous_plume_bool = previous_plume_bool.toarray()
+        convolution = scipy.signal.convolve2d(previous_plume_bool, np.ones((
+            9,9)),mode='same')
+        check_grid = convolution > 0
+        if prev_dust_assoc != None:
+            check_bool = check_grid | prev_dust_assoc
+        else:
+            check_bool = check_grid
+
+        dust_assoc_new_clouds = deepcopy(new_clouds)
+        dust_assoc_new_clouds[~check_bool] = 0
+
+        return dust_assoc_new_clouds, check_bool
+
+        # Second, do the convolution thing to draw a little buffer around
+        # all the new cloud, then do exactly the same thing but with the
+        # present plume bool. Store all IDs which are associated with the
+        # plume and return them
+
+        # Don't you think the plume should have to be of a certain age
+        # before it's allowed to create convection with an association?
+        # So for example you can't just get a new plume with a big
+        # convection object appearing next to it at the same time
+
+        # Or maybe a lag should be allowed? I.e. you could look back
+        #  even more timesteps
+
+        # Before coding this, the first thing to do would be to just
+        #  look at the deep convection field
+
+        # A cloud is also dust assoc if it overlaps with previous dust
+        # assoc, no?
+
 
 class Convection:
 

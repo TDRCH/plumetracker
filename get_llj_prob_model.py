@@ -64,7 +64,7 @@ def create_plume_dataframe(manual_filename, plume_archive_filename):
     data['conv_distance'] = conv_distances
     data['axis_direction_offset'] = axis_direction_offsets
     data['duration'] = durations
-    data['emission_speed'] = emission_speeds
+    #data['emission_speed'] = emission_speeds
     data['time_to_09'] = distances_from_09
     data['max_extent'] = max_extents
 
@@ -105,7 +105,9 @@ def logistic_llj_model(data, dpdtvarname, idpdtvarname1, idpdtvarname2,
 
 if __name__ == '__main__':
 
-    data = create_plume_dataframe('LLJ_manual_ID.csv', 'plume_archive_LLJ')
+    data = create_plume_dataframe('LLJ_manual_ID_2010.csv',
+                                  '/soge-home/projects/seviri_dust/'
+                    'plumetracker/plume_archive_flicker_v3_2010')
 
     g = seaborn.pairplot(data)
     plt.savefig('LLJ_pairplot.png')
@@ -143,6 +145,7 @@ if __name__ == '__main__':
 
     plt.figure(figsize=(9, 7))
     trace = trace_logistic_model[1000:]
+    print np.nanmean(trace['conv_distance'])
     seaborn.jointplot(trace['conv_distance'], trace['time_to_09'], kind="hex",
                       color="#4CB391")
     plt.xlabel("beta_conv_distance")

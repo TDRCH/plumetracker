@@ -10,6 +10,7 @@ import multiprocessing
 import os
 import copy
 import os.path
+from scipy import ndimage as ndi
 
 import utilities
 import plumes
@@ -22,12 +23,13 @@ def wrapper(yearmonth):
     year_lower = yearmonth[0]
     year_upper = yearmonth[0]
     month_lower = yearmonth[1][0]
+    #month_lower = 7
     month_upper = yearmonth[1][-1]
-    month_upper = 6
+    #month_upper = 7
     day_lower = 1
-    day_upper = 1
-    hour_lower = 0
-    hour_upper = 4
+    day_upper = 31
+    hour_lower = 9
+    hour_upper = 23
     minute_lower = 0
     minute_upper = 45
 
@@ -67,8 +69,9 @@ def wrapper(yearmonth):
     plume_objects = []
     flicker_ids = []
     reintroduced_ids = []
-    last_50_ids = []
-    last_50_ids = np.asarray(last_50_ids)
+    last_10_ids = []
+    last_10_ids = np.asarray(last_10_ids)
+    prev_dust_assoc_clouds = None
 
     # Restrict the lons and lats to the CWS alone
     lonbool = np.asarray([j >= -20 and j <= 10 for j in lons[0]])
@@ -79,14 +82,17 @@ def wrapper(yearmonth):
 
         plume_archive = shelve.open(
             '/soge-home/projects/seviri_dust/plumetracker/'
-                                    'plume_archive_flicker_v3_'+str(
-                yearmonth[
-                                                                        0]))
+                                    'plume_archive_flicker_v3_prob_'+str(
+                yearmonth[0]))
 
         if pickup:
             archived_ids = np.asarray([j for j in plume_archive])
             for i in archived_ids:
                 used_ids.append(int(i))
+            with open('date_i_'+str(yearmonth[0])+'.txt', 'r') as f:
+                pickup_date_i = f.read()
+            datestrings = datestrings[int(pickup_date_i):]
+            datetimes = datetimes[int(pickup_date_i):]
 
         for date_i in np.arange(0, len(datestrings)):
             runtime = datetimes[date_i] - datetimes[0]
@@ -237,7 +243,7 @@ def wrapper(yearmonth):
 
                 # Then, for each new ID, we initialise plume objects
                 for i in np.arange(0, len(new_ids)):
-                    print 'Creating new plume', new_ids[i]
+                    #print 'Creating new plume', new_ids[i]
                     plume = plumes.Plume(new_ids[i], datetimes[date_i])
                     plume.update_position(lats, lons, sdf_plumes, new_ids[i])
                     plume.update_duration(datetimes[date_i])
@@ -266,7 +272,7 @@ def wrapper(yearmonth):
                     # As long as there is an overlapping previous plume,
                     #  keep updating it back in time
                     while len(missing_plume) > 0:
-                        print 'Rolling back plume', new_ids[i]
+                        #print 'Rolling back plume', new_ids[i]
                         # We can only step back to the first timestep and no
                         # earlier
                         if (date_i - steps_back) < 0:
@@ -332,11 +338,11 @@ def wrapper(yearmonth):
                             raw_sdf_prev_prev)
 
                             if flickered:
-                                print 'Found a flickered plume. Searching ' \
-                                      'for the corresponding archived plume.'
+                                #print 'Found a flickered plume. Searching ' \
+                                #      'for the corresponding archived plume.'
                                 # We have a plume in a previous timestep
                                 # which flickered
-                                plume_archive_keys = last_50_ids.astype(int)
+                                plume_archive_keys = last_10_ids.astype(int)
                                 # Sort the keys in reverse order as the
                                 # plume we want is most likely to have a
                                 # high ID
@@ -372,9 +378,9 @@ def wrapper(yearmonth):
                                             plume_archive[str(
                                                 key)].dates_observed[-1] == \
                                                     search_date:
-                                        print 'Found it in plume archive. ' \
-                                              'ID is', \
-                                            plume_archive[str(key)].plume_id
+                                        #print 'Found it in plume archive. ' \
+                                        #      'ID is', \
+                                        #    plume_archive[str(key)].plume_id
                                         found_plume = True
 
                                         correct_plume = plume_archive[str(key)]
@@ -397,10 +403,10 @@ def wrapper(yearmonth):
                                         missing_plume = []
 
                                         # Reintroduced plumes also get removed
-                                        # from the record of the last 50 ids
-                                        index = np.argwhere(last_50_ids
+                                        # from the record of the last 10 ids
+                                        index = np.argwhere(last_10_ids
                                                             == key)
-                                        last_50_ids = np.delete(last_50_ids,
+                                        last_10_ids = np.delete(last_10_ids,
                                                                 index)
 
                                         break
@@ -457,10 +463,10 @@ def wrapper(yearmonth):
                                             reintroduced_ids.append(key)
                                             missing_plume = []
 
-                                            index = np.argwhere(last_50_ids
+                                            index = np.argwhere(last_10_ids
                                                                 == key)
-                                            last_50_ids = np.delete(
-                                                last_50_ids,
+                                            last_10_ids = np.delete(
+                                                last_10_ids,
                                                 index)
 
                                             break
@@ -483,9 +489,10 @@ def wrapper(yearmonth):
                 #    plume = plume_objects[str(merge_ids[i])]
                     #plume.merge()
 
+
                 # For old IDs, we just run an update.
                 for i in np.arange(0, len(old_ids)):
-                    print 'Updating plume', old_ids[i]
+                    #print 'Updating plume', old_ids[i]
                     plume = plume_objects[str(old_ids[i])]
                     #if plume.plume_id == 2:
                     #    print plume.dates_observed
@@ -499,8 +506,45 @@ def wrapper(yearmonth):
                     plume.update_centroid_speed()
                     plume.update_centroid_direction()
                     plume.update_max_extent()
+                    #plume_assoc_clouds, plume_check_bool \
+                    #    = plume.flag_dust_associated_convection(
+                    #    clouds, prev_dust_assoc_clouds)
+                    #dust_assoc_clouds += plume_assoc_clouds
+                    #check_bool += plume_check_bool.astype(int)
                     # plume.update_leading_edge_4(sdf_plumes, lons, lats)
                     plume_objects[str(old_ids[i])] = plume
+
+                """
+
+                raw_sdf_prev = raw_sdf_prev == 1
+                clouds = clouds == 1
+
+                if prev_dust_assoc_clouds != None:
+                    dust_assoc_clouds = clouds & (raw_sdf_prev |
+                                                  prev_dust_assoc_clouds)
+
+                else:
+                    dust_assoc_clouds = clouds & raw_sdf_prev
+
+                plt.contourf(lons, lats, dust_assoc_clouds)
+                plt.savefig('clouds_' + datestrings[date_i] +
+                            '_buffer.png')
+                plt.close()
+                prev_dust_assoc_clouds = dust_assoc_clouds
+
+                plt.contourf(lons, lats, clouds)
+                plt.savefig('clouds_' + datestrings[date_i])
+                plt.close()
+
+                #plt.contourf(lons, lats, check_bool)
+                #plt.savefig('clouds_' + datestrings[date_i]+'_checkbool.png')
+                #plt.close()
+
+                plt.contourf(lons, lats, sdf_now)
+                plt.savefig('clouds_' + datestrings[date_i]+'sdf.png')
+                plt.close()
+
+                """
 
                 # Plumes which no longer exist are removed and archived
                 if len(ids_previous) == 0:
@@ -511,7 +555,7 @@ def wrapper(yearmonth):
                     removed_ids = ids_previous[removed_bool]
 
                 for i in np.arange(0, len(removed_ids)):
-                    print 'Archiving plume', removed_ids[i]
+                    #print 'Archiving plume', removed_ids[i]
                     plume = plume_objects[str(removed_ids[i])]
                     plume.update_GPE_speed()
                     # plume.update_mechanism_likelihood()
@@ -522,10 +566,10 @@ def wrapper(yearmonth):
                     #print plume.centroid_lon
                     #print plume.centroid_lat
                     del plume_objects[str(removed_ids[i])]
-                    last_50_ids = np.append(last_50_ids, removed_ids[i])
+                    last_10_ids = np.append(last_10_ids, removed_ids[i])
 
-                if len(last_50_ids) > 50:
-                    last_50_ids = last_50_ids[0:50]
+                if len(last_10_ids) > 10:
+                    last_10_ids = last_10_ids[0:10]
 
                 if len(np.unique(sdf_plumes)) < 2:
                     sdf_previous = None
@@ -544,6 +588,13 @@ def wrapper(yearmonth):
                 print 'Adding date to list of missing dates'
                 with open('missing_dates.txt', 'a') as my_file:
                     my_file.write('\n'+datestrings[date_i])
+
+            # Print date_i so we know where we got up to in case we have to
+                    # restart
+
+            with open('date_i_'+str(yearmonth[0])+'.txt', 'w') as f:
+                f.write('%d' % date_i)
+
         # After the script has finished, add remaining plumes to the plume archive
         for i in plume_objects:
             plume_archive[i] = plume_objects[i]
@@ -555,18 +606,26 @@ def wrapper(yearmonth):
 if __name__ == '__main__':
 
     run = True
-    run_mcmc = False
-    no_trace = True
+    run_mcmc = True
+    no_trace = False
     pickup = False
 
     if run_mcmc:
         data = get_llj_prob_model.create_plume_dataframe(
-            'LLJ_manual_ID.csv', 'plume_archive_LLJ')
+            'LLJ_manual_ID_2010.csv', '/soge-home/projects/seviri_dust/'
+                    'plumetracker/completed_archives'
+                                      '/plume_archive_flicker_v3_2010')
 
         trace = get_llj_prob_model.logistic_llj_model(data, 'LLJ',
                                                       'conv_distance',
                                                       'time_to_09',
                                                       'duration')
+
+        prob = np.nanmean(1 / (1 + np.exp(-(trace['Intercept'] +
+                                            trace['conv_distance'] * 10 +
+                                            trace['time_to_09'] * 0 +
+                                            trace['duration'] * 10000))))
+        print prob
 
     if no_trace:
         trace = None
@@ -581,16 +640,15 @@ if __name__ == '__main__':
               [6, 7, 8]]
     yearmonths = zip(years, months)
 
-    wrapper(yearmonths[6])
+    #wrapper(yearmonths[6])
 
-    """
     processes = [multiprocessing.Process(target=wrapper, args=(i,))
                  for i in yearmonths]
     for p in processes:
         p.start()
     for p in processes:
         p.join()
-    """
+
 
 
 
