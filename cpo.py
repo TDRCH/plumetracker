@@ -27,7 +27,7 @@ from skimage.measure import label, regionprops
 import utilities
 
 # Global function to scan the SDFs for unique plumes
-def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
+def scan_for_blobs(cpo_now, cpo_prev, used_ids, clouds):
     """
     Scans a set of SDFs for plumes and labels them
     :param SDF_now:
@@ -36,52 +36,48 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
 
     merge_ids = []
 
-    if sdf_prev is None:
-        label_objects, nb_labels = ndi.label(sdf_now)
+    if cpo_prev is None:
+
+        label_objects, nb_labels = ndi.label(cpo_now)
         sizes = np.bincount(label_objects.ravel())
 
-        # Set clusters smaller than size 250 to zero
-        mask_sizes = sizes > 250
+        # Set clusters smaller than size 50 to zero
+        mask_sizes = sizes > 50
         mask_sizes[0] = 0
-        sdf_now = mask_sizes[label_objects]
+        cpo_now = mask_sizes[label_objects]
 
-        # Plume infilling is here - switch off for now
-        #sdf_now, infilled = plume_infilling(sdf_now, clouds)
-
-        sdf_clusters, num = measurements.label(sdf_now)
+        cpo_clusters, num = measurements.label(cpo_now)
         if len(used_ids) > 0:
             # Increase the plume_ID so that they are all new
             old_id_max = np.max(used_ids)
-            sdf_clusters[sdf_clusters != 0] += old_id_max
-        plume_ids = np.unique(sdf_clusters)
-        large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
+            cpo_clusters[cpo_clusters != 0] += old_id_max
+        plume_ids = np.unique(cpo_clusters)
+        large_plume_ids = np.unique(cpo_clusters[cpo_clusters != 0])
         #print large_plume_ids
         new_ids = large_plume_ids
 
     else:
-        label_objects, nb_labels = ndi.label(sdf_now)
+
+        label_objects, nb_labels = ndi.label(cpo_now)
         sizes = np.bincount(label_objects.ravel())
 
-        # Set clusters smaller than size 250 to zero
-        mask_sizes = sizes > 250
+        # Set clusters smaller than size 50 to zero
+        mask_sizes = sizes > 50
         mask_sizes[0] = 0
-        sdf_now = mask_sizes[label_objects]
+        cpo_now = mask_sizes[label_objects]
 
-        # Plume infilling is here - switch off for now
-        #sdf_now, infilled = plume_infilling(sdf_now, clouds)
-
-        sdf_clusters, num = measurements.label(sdf_now)
-        plume_ids = np.unique(sdf_clusters)
-        large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
+        cpo_clusters, num = measurements.label(cpo_now)
+        plume_ids = np.unique(cpo_clusters)
+        large_plume_ids = np.unique(cpo_clusters[cpo_clusters != 0])
 
         # Increase the plume_ID so that they are all new
         old_id_max = np.max(used_ids)
-        sdf_clusters[sdf_clusters != 0] += old_id_max
+        cpo_clusters[cpo_clusters != 0] += old_id_max
 
         # Get an array of plumes which are overlapping
-        overlaps = (sdf_clusters > 0) & (sdf_prev > 0)
-        overlapping_ids = np.unique(sdf_clusters[overlaps])
-        large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
+        overlaps = (cpo_clusters > 0) & (cpo_prev > 0)
+        overlapping_ids = np.unique(cpo_clusters[overlaps])
+        large_plume_ids = np.unique(cpo_clusters[cpo_clusters != 0])
 
         new_ids = [j for j in large_plume_ids if j not in overlapping_ids]
         if new_ids == [0]:
@@ -91,14 +87,14 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
             new_id_bool = np.asarray([i != 0 for i in new_ids])
             if new_ids.shape[0] > 0:
                 new_ids = np.unique(new_ids[new_id_bool])
-        old_id_array = np.zeros(np.shape(sdf_clusters))
+        old_id_array = np.zeros(np.shape(cpo_clusters))
         # An array of previous IDs so we can check if the same ID has been
         # reassigned more than once (i.e. a split)
         overlap_prev_ids = {}
         split_ids = []
         for i in overlapping_ids:
-            current = sdf_clusters[sdf_clusters == i]
-            prev_ids = sdf_prev[sdf_clusters == i]
+            current = cpo_clusters[cpo_clusters == i]
+            prev_ids = cpo_prev[cpo_clusters == i]
             # Remove zeros
             prev_ids = prev_ids[prev_ids != 0]
             # Take the most common of the previous IDs as the one which should
@@ -109,97 +105,26 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
             if len(np.unique(prev_ids)) > 1:
                 merge_ids.append(prev_id)
 
-            old_id_array[sdf_clusters == i] = prev_id
-            sdf_clusters[sdf_clusters == i] = prev_id
+            old_id_array[cpo_clusters == i] = prev_id
+            cpo_clusters[cpo_clusters == i] = prev_id
 
-            """
-
-            # Check if the ID is already a key in the dictionary
-            if prev_id in overlap_prev_ids:
-                # This previous ID was involved in a split
-                split_ids.append(prev_id)
-                if overlap_prev_ids[prev_id] < current_size:
-                    # This is the largest sized plume for this previous ID
-                    overlap_prev_ids[prev_id] = current_size
-                    # Set prev_ID to whatever that is
-                    old_id_array[sdf_clusters == i] = prev_id
-                    sdf_clusters[sdf_clusters == i] = prev_id
-            else:
-                overlap_prev_ids[prev_id] = current_size
-            """
-            # The IDs we want now are the new plume IDs which are not
-                # continuations of the old, so that we don't misidentify
-                # them as a source. We want the plume IDs which were not
-                # converted to a prev ID because another plume ID had a
-                # larger area
-            # We also want to identify the prev ID which split so that we
-                # don't get the propagation wrong on it
-
-            # So as for sub-250 plumes - they need to be assigned temporary
-                # IDs, then as plume tracker rolls through, it gets to the
-                # end of these temp plumes' lifetime, checks if they ever
-                # got to 250 size and, if they did, grants them status as a
-                # true plume. Otherwise they get cast into the flames of
-                # oblivion
-
-            # The above is quite a computationally intensive method,
-                # however. It requires you to basically be tracking a LOT of
-                #  random little baby plumes, making plume bools for them
-                # and all
-
-                # How about instead, if a plume is close to the 250
-                # limit, it checks for flickering by looking at the raw
-                # SDF for the previous timestep and seeing if there's
-                # any overlapping SDF which are not already accounted for
-                # if there are, it adds a previous timestep and does all
-                #  the bells and whistles, then it checks the timestep
-                # before that...HENCE IT IS THE CHAIN FLICKER CHECKER
-
-                # If you were to do that with the plumescanner part,
-                # you'd have to look at the previous timestep again,
-                # and then the one before..all rather tricky
-
-                # With plumetracker, you at least have access to all the
-                #  timesteps from the tracks.
-
-        """
-        prev_id_counts = np.unique(overlap_prev_ids, return_counts=True)[1]
-        for i in np.arange(0, len(prev_id_counts)):
-            if prev_id_counts[i] > 1:
-                split_ids.append(overlap_prev_ids[i])
-                # Find the size of the plume
-                # If the plume is the largest, it keeps its ID
-                # Otherwise it gets assigned a new one
-                # Or, as you're assigning prev ids above, add the size of
-                # the overlapping id plume to a list. Then, if it turns out
-                # a plume is within overlap prev ids, add the prev id to
-                # split ids, then test if the size of this plume is larger
-                # than the size of the previous plume wit the same assigned
-                # prev id. If it's larger, it gets the prev id, and the
-                # previous plume gets assigned a different one
-                # So for this you need a dictionary of overlapping
-                # prev ids and the size of their respective plumes
-
-                ## WATCH OUT ## This current code creates plumes from
-                # splits, which will be identified as new plumes
-        """
-        large_plume_ids = np.unique(sdf_clusters[sdf_clusters != 0])
+        large_plume_ids = np.unique(cpo_clusters[cpo_clusters != 0])
 
         # Fix the new IDs so that they follow directly from the previous
         # largest one
         if len(new_ids) > 0:
-            old_ids = np.unique(sdf_prev[sdf_prev != 0])
+            old_ids = np.unique(cpo_prev[cpo_prev != 0])
             replacement_new_ids = np.arange(np.max(used_ids)+1, np.max(
                 used_ids)+1+len(new_ids))
             for i in np.arange(0, len(new_ids)):
 
-                sdf_clusters[sdf_clusters == new_ids[i]] = (
+                cpo_clusters[cpo_clusters == new_ids[i]] = (
                     replacement_new_ids[i])
                 large_plume_ids[large_plume_ids == new_ids[i]] = (
                 replacement_new_ids[i])
                 new_ids[i] = replacement_new_ids[i]
 
-    return sdf_clusters, new_ids, large_plume_ids, merge_ids#, split_ids
+    return cpo_clusters, new_ids, large_plume_ids, merge_ids
 
 def plume_infilling(sdf_now, clouds):
     """
@@ -237,7 +162,7 @@ def plume_infilling(sdf_now, clouds):
 
     return sdf_infilled, hole_conv_colocation
 
-class Plume:
+class CPO:
 
     def __init__(self, plume_id, emission_time):
         self.plume_id = plume_id
@@ -1069,18 +994,7 @@ class Plume:
                     plumes_prev = plumes_prev.astype(int)
                     #print np.bincount(plumes_prev.ravel())
                     plumes_prev = plumes_prev == 1
-                    """
-                    plt.contourf(plumes_prev)
-                    plt.savefig('flickered_plume_' + str(self.plume_id))
-                    plt.close()
-                    checkgrid = np.zeros(plumes_prev.shape)
-                    checkgrid[plumes_prev] = 4
-                    plt.contourf(checkgrid)
-                    plt.savefig('flickered_plume_check' + str(
-                        self.plume_id))
-                    plt.close()
-                    """
-                    if np.bincount(plumes_prev.ravel())[1] > 250:
+                    if np.bincount(plumes_prev.ravel())[1] > 50:
                         # We found a plume which went underneath the plume
                         # size threshold - this is a flickering plume
                         return plumes_prev, self.plume_id, True

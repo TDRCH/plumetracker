@@ -53,13 +53,13 @@ if __name__ == '__main__':
     year_lower = 2010
     year_upper = 2010
     month_lower = 6
-    month_upper = 6
+    month_upper = 8
     day_lower = 1
-    day_upper = 3
+    day_upper = 31
     hour_lower = 0
-    hour_upper = 0
+    hour_upper = 23
     minute_lower = 0
-    minute_upper = 0
+    minute_upper = 45
 
     time_params = np.array([year_lower, year_upper, month_lower,
                             month_upper, day_lower, day_upper,

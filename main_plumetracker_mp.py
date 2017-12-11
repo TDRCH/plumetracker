@@ -11,6 +11,10 @@ import os
 import copy
 import os.path
 from scipy import ndimage as ndi
+from matplotlib.colors import BoundaryNorm
+from matplotlib.ticker import MaxNLocator
+import matplotlib.cm as cm
+import scipy.signal
 
 import utilities
 import plumes
@@ -23,13 +27,13 @@ def wrapper(yearmonth):
     year_lower = yearmonth[0]
     year_upper = yearmonth[0]
     month_lower = yearmonth[1][0]
-    #month_lower = 7
+    month_lower = 7
     month_upper = yearmonth[1][-1]
     #month_upper = 7
-    day_lower = 1
+    day_lower = 13
     day_upper = 31
-    hour_lower = 9
-    hour_upper = 23
+    hour_lower = 1
+    hour_upper = 6
     minute_lower = 0
     minute_upper = 45
 
@@ -48,6 +52,14 @@ def wrapper(yearmonth):
     # These need to be regridded to regular for consistency with cloud mask
     lons = lonlats.variables['longitude'][:]
     lats = lonlats.variables['latitude'][:]
+    # Get lats and lons
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
     lonmask = lons > 360
     latmask = lats > 90
     lons = np.ma.array(lons, mask=lonmask)
@@ -82,8 +94,8 @@ def wrapper(yearmonth):
 
         plume_archive = shelve.open(
             '/soge-home/projects/seviri_dust/plumetracker/'
-                                    'plume_archive_flicker_v3_prob_'+str(
-                yearmonth[0]))
+                                    'plume_archive_flicker_v3_prob_v3_debug_'
+            ''+str(yearmonth[0]))
 
         if pickup:
             archived_ids = np.asarray([j for j in plume_archive])
@@ -129,6 +141,116 @@ def wrapper(yearmonth):
                                                       '-000005___-'
                     + datestrings[date_i] +
                     '-__.nc')
+
+                cloudmask = Dataset(
+                    '/soge-home/data/satellite/meteosat/seviri/15-min/'
+                    '0.03x0.03/cloudmask'
+                    '/nc/'
+                    +
+                    datetimes[date_i].strftime("%B").upper(
+                    ) + str(datetimes[date_i].year) + '_CLOUDS/eumetsat.cloud.'
+                    + datestrings[date_i] + '.nc')
+
+                # Produce 12-10.8 imagery
+                bt12 = bt.variables['bt120'][:][0]
+                bt108 = bt.variables['bt108'][:][0]
+                clouds_now = cloudmask.variables['cmask'][:][0]
+
+                orig_lons = bt.variables['longitude'][:]
+                orig_lats = bt.variables['latitude'][:]
+                cloud_lons = cloudmask.variables['lon'][:]
+                cloud_lats = cloudmask.variables['lat'][:]
+
+                #print bt12.shape
+                #print clouds_now.shape
+
+                print 'regridding'
+                orig_lons, orig_lats = np.meshgrid(orig_lons, orig_lats)
+                #cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
+
+                bt12_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
+                                                      cloud_lons,
+                                              cloud_lats, bt12)
+                bt108_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
+                                                      cloud_lons,
+                                                      cloud_lats, bt108)
+
+
+                btdiff = bt12_regridded-bt108_regridded
+                #label_objects, nb_labels = ndi.label(btdiff)
+                #sizes = np.bincount(label_objects.ravel())
+
+                # Set clusters smaller than size 250 to zero
+                #mask_sizes = sizes > 250
+                #mask_sizes[0] = 0
+                #btdiff= mask_sizes[label_objects]
+
+                # Now try to get the sum of the X and Y gradients
+                lat_grad, lon_grad = np.gradient(btdiff)
+                total_grad = np.sqrt(lat_grad ** 2 + lon_grad ** 2)
+
+                sdf_now = sdf.variables['bt108'][0]
+                btdiff[sdf_now==1] = np.nan
+                #clouds_now[clouds_now == 1] = 0
+                #clouds_now[clouds_now == 3] = 0
+                #clouds_now[clouds_now == 2] = 1
+                #convolution = scipy.signal.convolve2d(clouds_now,
+                #                                      np.ones((10,
+                #                                               10)),
+                #                                      mode='same')
+                #clouds_now = convolution > 0
+                btdiff[clouds_now > 0] = np.nan
+
+                plt.close()
+
+                extent = (
+                np.min(cloud_lons), np.max(cloud_lons), np.min(cloud_lats), np.max(
+                    cloud_lats))
+                m = Basemap(projection='cyl', llcrnrlon=extent[0],
+                            urcrnrlon=extent[1],
+                            llcrnrlat=extent[2], urcrnrlat=extent[3],
+                            resolution='i')
+
+                m.drawcoastlines(linewidth=0.5)
+                m.drawcountries(linewidth=0.5)
+                parallels = np.arange(10., 40, 2.)
+                # labels = [left,right,top,bottom]
+                m.drawparallels(parallels, labels=[False, True, True, False],
+                                linewidth=0.5)
+                meridians = np.arange(-20., 17., 4.)
+                m.drawmeridians(meridians, labels=[True, False, False, True],
+                                linewidth=0.5)
+
+                btdiff = np.ma.masked_where(
+                    np.isnan(btdiff),
+                    btdiff)
+
+                min = -6
+                max = 3
+
+                levels = MaxNLocator(nbins=15).tick_values(min, max)
+
+                # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+                cmap = cm.get_cmap('Blues')
+                norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+                # m.pcolormesh(lons, lats, correlation_array, extent=extent,
+                #             origin='lower',
+                #         interpolation='none',
+                #         cmap=cmap, vmin=min, vmax=max+1)
+
+                m.pcolormesh(cloud_lons, cloud_lats, btdiff,
+                             cmap=cmap, vmin=min, vmax=max,norm=norm)
+
+                cbar = plt.colorbar(orientation='horizontal', fraction=0.056,
+                                    pad=0.06)
+                cbar.ax.set_xlabel('BT 12.0 - BT 10.8 (K)')
+                plt.tight_layout()
+                plt.savefig('BT_120_108_diff_'+datestrings[
+                    date_i]+'.png',
+                            bbox_inches='tight')
+
+                plt.close()
             except:
 
                 if os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/'
@@ -251,7 +373,7 @@ def wrapper(yearmonth):
                     #    print plume.dates_observed
                     #    print plume.dates_observed
                     plume.update_bbox()
-                    plume.update_majorminor_axes()
+                    plume.update_majorminor_axes(lons, lats)
                     plume.update_area()
                     plume.update_max_extent()
                     plume.update_centroid_speed()
@@ -292,7 +414,7 @@ def wrapper(yearmonth):
                             #if plume.plume_id == 18:
                             #    print plume.dates_observed
                             plume.update_bbox()
-                            plume.update_majorminor_axes()
+                            plume.update_majorminor_axes(lons, lats)
                             plume.update_area()
                             plume.update_max_extent()
                             plume.update_centroid_speed()
@@ -484,10 +606,10 @@ def wrapper(yearmonth):
                     plume_ids = np.delete(plume_ids, index)
                     del plume_objects[str(flicker_ids[i])]
 
-                # For merged IDs, we move the tracks to pre-merge tracks
-                #for i in np.arange(0, len(merge_ids)):
-                #    plume = plume_objects[str(merge_ids[i])]
-                    #plume.merge()
+                #For merged IDs, we move the tracks to pre-merge tracks
+                for i in np.arange(0, len(merge_ids)):
+                    plume = plume_objects[str(merge_ids[i])]
+                    plume.merge()
 
 
                 # For old IDs, we just run an update.
@@ -501,7 +623,7 @@ def wrapper(yearmonth):
                     #if plume.plume_id == 18:
                     #    print plume.dates_observed
                     plume.update_bbox()
-                    plume.update_majorminor_axes()
+                    plume.update_majorminor_axes(lons, lats)
                     plume.update_area()
                     plume.update_centroid_speed()
                     plume.update_centroid_direction()
@@ -559,6 +681,7 @@ def wrapper(yearmonth):
                     plume = plume_objects[str(removed_ids[i])]
                     plume.update_GPE_speed()
                     # plume.update_mechanism_likelihood()
+                    plume.update_mean_axis_offset()
                     plume.update_llj_probability(trace)
                     plume_archive[str(removed_ids[i])] = plume
                     #print 'Plume', plume.plume_id,'removed. Final lons and \
@@ -606,8 +729,8 @@ def wrapper(yearmonth):
 if __name__ == '__main__':
 
     run = True
-    run_mcmc = True
-    no_trace = False
+    run_mcmc = False
+    no_trace = True
     pickup = False
 
     if run_mcmc:
@@ -619,12 +742,13 @@ if __name__ == '__main__':
         trace = get_llj_prob_model.logistic_llj_model(data, 'LLJ',
                                                       'conv_distance',
                                                       'time_to_09',
-                                                      'duration')
+                                                      'axis_direction_offset')
 
         prob = np.nanmean(1 / (1 + np.exp(-(trace['Intercept'] +
-                                            trace['conv_distance'] * 10 +
+                                            trace['conv_distance'] * 1000 +
                                             trace['time_to_09'] * 0 +
-                                            trace['duration'] * 10000))))
+                                            trace['axis_direction_offset'] *
+                                            10))))
         print prob
 
     if no_trace:
@@ -640,7 +764,7 @@ if __name__ == '__main__':
               [6, 7, 8]]
     yearmonths = zip(years, months)
 
-    #wrapper(yearmonths[6])
+    wrapper(yearmonths[6])
 
     processes = [multiprocessing.Process(target=wrapper, args=(i,))
                  for i in yearmonths]
