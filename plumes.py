@@ -21,10 +21,13 @@ import cv2
 import matplotlib.pyplot as plt
 import datetime as dt
 import math
+import shelve
 from mpl_toolkits.basemap import Basemap
 from skimage.measure import label, regionprops
+from netCDF4 import Dataset
 
 import utilities
+import pinkdust
 
 # Global function to scan the SDFs for unique plumes
 def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
@@ -201,6 +204,163 @@ def scan_for_plumes(sdf_now, sdf_prev, used_ids, clouds):
 
     return sdf_clusters, new_ids, large_plume_ids, merge_ids#, split_ids
 
+def update_plume_probs():
+    """
+    Updates the probabilities of all plumes with any conditions or new
+    predictors (without needing to run plumetracker in its entirety)
+    :return:
+    """
+
+    # Get cpo archives
+    ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2004')
+    ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2005')
+    ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2006')
+    ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2007')
+    ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2008')
+    ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2009')
+    ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2010')
+    cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010]
+
+    # Get plume archives
+    pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2004')
+    pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2005')
+    pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2006')
+    pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2007')
+    pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2008')
+    pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2009')
+    pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2010')
+    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009, pa2010]
+
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
+
+    # Get lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
+
+    # Loop through all plume archives
+    # Loop through all plumes
+    # Check the emission time of the plume
+    # If the emission time is outside the LLJ emission window, set the LLJ
+    # prob to 0 (emission time should be more generous after than before)
+    # If there is an active CPO at this time, check if the plume is emitted
+    # within its sweep. If so, set LLJ probability to 0
+
+    print 'Processing CPO dates'
+    for archive_i in np.arange(0, len(cpo_archives)):
+        # All you need is a list of IDs active for each datetime
+        date_dictionary = {}
+
+        for i in cpo_archives[archive_i]:
+            if cpo_archives[archive_i][i].merged == True:
+                dates_observed = cpo_archives[archive_i][i].pre_merge_dates_observed
+                post_merge_dates = cpo_archives[archive_i][i].dates_observed
+                for j in post_merge_dates:
+                    dates_observed.append(j)
+            else:
+                dates_observed = cpo_archives[archive_i][i].dates_observed
+            for j in dates_observed:
+                if j in date_dictionary:
+                    date_dictionary[j].append(i)
+                else:
+                    date_dictionary[j] = []
+                    date_dictionary[j].append(i)
+
+    archive_idx = 1
+
+    print 'Processing plume probabilities'
+    for plume_archive in plume_archives:
+        print 'Plume archive', archive_idx
+        archive_idx += 1
+        archive_size = len(plume_archive)
+        plume_idx = 1
+        used_percentages = []
+        for i in plume_archive:
+            if int((float(plume_idx) / float(
+                    archive_size)) * 100) % 10 == 0 and int((float(
+                plume_idx) / float(archive_size)) * 100) not in \
+                    used_percentages:
+                print str(int((float(plume_idx) / float(
+                    archive_size)) * 100)) + "%"
+                # This percentage has been printed already
+                used_percentages.append(int((float(plume_idx) / float(
+                    archive_size)) * 100))
+            plume_idx += 1
+            # If the plume has merged, the plume source is found in the
+            # pre-merge track
+            plume = plume_archive[i]
+
+            # Emission times - no LLJs can be emitted outside of these
+            # generous time bounds
+            emission_time = plume.emission_time
+            if emission_time.hour < 3 or emission_time.hour > 16:
+                plume.archive_LLJ_prob = deepcopy(plume.LLJ_prob)
+                plume.LLJ_prob = 0
+
+            emission_bool = plume.track_plume_bool[0]
+
+            for date in plume.dates_observed:
+                cpo_sweeps = np.zeros((cloud_lons.shape))
+                if date in date_dictionary:
+                    active_cpos = date_dictionary[date]
+                    for j in np.arange(0, len(active_cpos)):
+                        cpo_i = active_cpos[j]
+                        cpo = cpo_archives[archive_idx-1][cpo_i]
+                        cpo_dates = cpo.dates_observed
+                        cpo_index_bool = np.asarray([k <= date for k in
+                                                     cpo_dates])
+                        cpo_bools_to_date = cpo.track_plume_bool[cpo_index_bool]
+                        cpo_bools_to_date = np.asarray([k.toarray() for k in
+                                                        cpo_bools_to_date])
+                        # Find the union of all CPO bools to date
+                        cpo_sweep = np.sum(cpo_bools_to_date, axis=0)
+                        cpo_sweep = cpo_sweep > 0
+                        cpo_sweeps += cpo_sweep
+
+                    emission_bool_regridded = pinkdust.regrid_data(lons,
+                                                               lats,
+                                                       cloud_lons,
+                                                       cloud_lats, emission_bool)
+                    if np.any(emission_bool_regridded & cpo_sweeps):
+                        # An overlap between the emitted plume and a CPO sweep
+                        plume.archive_LLJ_prob = deepcopy(plume.LLJ_prob)
+                        plume.LLJ_prob = 0
+                        break
+            print i
+            plume_archive[i] = plume
+
+    for i in plume_archives:
+        i.close()
+    for i in cpo_archives:
+        i.close()
+
 def plume_infilling(sdf_now, clouds):
     """
     Fills in small areas of dust surrounding convection. These plumes are
@@ -265,7 +425,8 @@ class Plume:
         self.pre_merge_track_speed_centroid = []
         self.pre_merge_dates_observed = []
         self.pre_merge_track_direction = []
-        self.LLJ_prob = None
+        self.LLJ_prob = np.nan
+        self.LLJ_prob_std = np.nan
         self.mean_axis_offset = None
 
     # So, at every timestep you have a whole load of SDFs
@@ -822,6 +983,7 @@ class Plume:
 
         if trace == None:
             self.LLJ_prob = np.nan
+            self.LLJ_prob_std = np.nan
         else:
             emission_time = self.dates_observed[0]
 
@@ -836,7 +998,7 @@ class Plume:
             # The probability is calculated as the mean of the distribution of
             # probabilities from our logistic function
             if self.mean_axis_offset != None:
-                self.LLJ_prob = np.nanmean(1 / (1 + np.exp(-(trace['Intercept'] +
+                LLJ_probs = (1 / (1 + np.exp(-(trace['Intercept'] +
                                                     trace['conv_distance'] *
                                                     self.conv_distance +
                                                     trace['time_to_09'] *
@@ -844,6 +1006,17 @@ class Plume:
                                                     trace['axis_direction_offset'] *
                                                     self.mean_axis_offset)
                                                            )))
+                mean_LLJ_prob = np.nanmean(LLJ_probs)
+                stdev_LLJ_prob = np.std(LLJ_probs)
+
+                self.LLJ_prob = mean_LLJ_prob
+                self.LLJ_prob_std = stdev_LLJ_prob
+
+                #print 'conv distance', self.conv_distance
+                #print 'distance from 09', distance_from_09
+                #print 'mean axis offset', self.mean_axis_offset
+                #print 'LLJ prob', self.LLJ_prob
+                #print 'LLJ std', self.LLJ_prob_std
 
 
     def convection_infilling(self, lats, lons, clouds):
@@ -1052,9 +1225,9 @@ class Plume:
             local_label_objects = deepcopy(label_objects)
             local_label_objects[~plume_bool] = 0
             sizes = np.bincount(local_label_objects.ravel())
-            # Only proceed if we have plumes larger than size one
+            # Only proceed if we have plumes larger than size 14
             if len(sizes) > 1:
-                if np.max(sizes[1:] > 1):
+                if np.max(sizes[1:] > 14):
                     sizes = sizes[sizes != 0]
                     sizes_sorted = deepcopy(sizes)
                     sizes_sorted.sort()
@@ -1069,17 +1242,6 @@ class Plume:
                     plumes_prev = plumes_prev.astype(int)
                     #print np.bincount(plumes_prev.ravel())
                     plumes_prev = plumes_prev == 1
-                    """
-                    plt.contourf(plumes_prev)
-                    plt.savefig('flickered_plume_' + str(self.plume_id))
-                    plt.close()
-                    checkgrid = np.zeros(plumes_prev.shape)
-                    checkgrid[plumes_prev] = 4
-                    plt.contourf(checkgrid)
-                    plt.savefig('flickered_plume_check' + str(
-                        self.plume_id))
-                    plt.close()
-                    """
                     if np.bincount(plumes_prev.ravel())[1] > 250:
                         # We found a plume which went underneath the plume
                         # size threshold - this is a flickering plume

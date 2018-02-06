@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
+from netCDF4 import num2date
 import numpy as np
 from mpl_toolkits.basemap import Basemap
 import datetime
@@ -15,6 +16,7 @@ from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MaxNLocator
 import matplotlib.cm as cm
 import scipy.signal
+import tables
 
 import utilities
 import plumes
@@ -26,14 +28,12 @@ def wrapper(yearmonth):
 
     year_lower = yearmonth[0]
     year_upper = yearmonth[0]
-    month_lower = yearmonth[1][0]
-    month_lower = 7
-    month_upper = yearmonth[1][-1]
-    #month_upper = 7
-    day_lower = 13
+    month_lower = yearmonth[-1][0]
+    month_upper = yearmonth[-1][-1]
+    day_lower = 1
     day_upper = 31
-    hour_lower = 1
-    hour_upper = 6
+    hour_lower = 0
+    hour_upper = 23
     minute_lower = 0
     minute_upper = 45
 
@@ -42,16 +42,18 @@ def wrapper(yearmonth):
                             hour_lower, hour_upper, minute_lower,
                             minute_upper])
 
+    # Get datetime objects between the above bounds
+
+    window_datetime_lower = datetime.datetime(year_lower, 6,
+                                              1, 0, 0) \
+                            - datetime.timedelta(days=7)
+    window_datetime_upper = datetime.datetime(year_upper, 8,
+                                              31, 23, 45) \
+                            + datetime.timedelta(days=7)
+
     datetimes = utilities.get_datetime_objects(time_params)
     datestrings = [j.strftime("%Y%m%d%H%M") for j in datetimes]
 
-    lonlats = Dataset(
-        '/ouce-home/data/satellite/meteosat/seviri/15-min/native/'
-        'lonlats.NA_MiddleEast.nc')
-
-    # These need to be regridded to regular for consistency with cloud mask
-    lons = lonlats.variables['longitude'][:]
-    lats = lonlats.variables['latitude'][:]
     # Get lats and lons
     sdf_test = Dataset(
         '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
@@ -94,7 +96,7 @@ def wrapper(yearmonth):
 
         plume_archive = shelve.open(
             '/soge-home/projects/seviri_dust/plumetracker/'
-                                    'plume_archive_flicker_v3_prob_v3_debug_'
+                                    'plume_archive_flicker_v4_prob_v4_'
             ''+str(yearmonth[0]))
 
         if pickup:
@@ -111,162 +113,62 @@ def wrapper(yearmonth):
             print '\n' + datestrings[date_i] + '\n'
             totaltest = datetime.datetime.now()
 
-            if os.path.isfile('/soge-home/data_not_backed_up/satellite/'
-                              'meteosat/seviri/15-min/0.03x0.03/sdf/nc/' +
-                datetimes[date_i].strftime("%B").upper(
-                ) + str(datetimes[date_i].year) + '/SDF_v2/SDF_v2.' + \
+            if tch_sdfs == False:
+                sdf_root = '/soge-home/data_not_backed_up/satellite/meteosat' \
+                           '/seviri/15' \
+                           '-min/0.03x0.03/sdf/nc/'+datetimes[date_i].strftime(
+                    '%B').upper()+str(datetimes[date_i].year)+'/SDF_v2/'
+            else:
+                sdf_root = '/soge-home/projects/seviri_dust/sdf/'\
+                           +datetimes[date_i].strftime('%B')\
+                           +str(datetimes[date_i].year)+'/'
+
+            if os.path.isfile(sdf_root+'SDF_v2.' + \
                 datestrings[date_i] + '.nc'):
 
                 sdf = Dataset(
-                    '/soge-home/data_not_backed_up/satellite/meteosat/seviri/'
-                    '15-min/0.03x0.03/sdf/nc/' +
-                    datetimes[date_i].strftime("%B").upper(
-                    ) + str(datetimes[date_i].year) + '/SDF_v2/SDF_v2.' + \
-                    datestrings[date_i] + '.nc')
+                        sdf_root + 'SDF_v2.' + \
+                        datestrings[date_i] + '.nc')
                 found_file = True
+                #print sdf
             else:
-                'No file found for this date'
+                print 'No SDF file found for this date'
                 found_file = False
 
-            try:
-                bt = Dataset(
-                    '/ouce-home/data/satellite/meteosat/seviri/15-min/'
-                    '0.03x0.03/bt'
-                    '/nc/'
-                    +
-                    datetimes[date_i].strftime("%B").upper(
-                    ) + str(datetimes[date_i].year) + '/H-000-MSG2__'
-                                                      '-MSG2________-'
-                                        'IR_BrightnessTemperatures___'
-                                                      '-000005___-'
-                    + datestrings[date_i] +
-                    '-__.nc')
+            if daily_bt_files:
 
-                cloudmask = Dataset(
-                    '/soge-home/data/satellite/meteosat/seviri/15-min/'
-                    '0.03x0.03/cloudmask'
-                    '/nc/'
-                    +
-                    datetimes[date_i].strftime("%B").upper(
-                    ) + str(datetimes[date_i].year) + '_CLOUDS/eumetsat.cloud.'
-                    + datestrings[date_i] + '.nc')
+                # Pull BTs from daily nc files
+                bt = Dataset(daily_bt_root+datetimes[date_i].strftime(
+                    "%B%Y")+'/BT_'+datetimes[
+                    date_i].strftime("%Y%m%d")+'.nc')
+                found_file = True
+            else:
 
-                # Produce 12-10.8 imagery
-                bt12 = bt.variables['bt120'][:][0]
-                bt108 = bt.variables['bt108'][:][0]
-                clouds_now = cloudmask.variables['cmask'][:][0]
+                try:
 
-                orig_lons = bt.variables['longitude'][:]
-                orig_lats = bt.variables['latitude'][:]
-                cloud_lons = cloudmask.variables['lon'][:]
-                cloud_lats = cloudmask.variables['lat'][:]
-
-                #print bt12.shape
-                #print clouds_now.shape
-
-                print 'regridding'
-                orig_lons, orig_lats = np.meshgrid(orig_lons, orig_lats)
-                #cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
-
-                bt12_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
-                                                      cloud_lons,
-                                              cloud_lats, bt12)
-                bt108_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
-                                                      cloud_lons,
-                                                      cloud_lats, bt108)
-
-
-                btdiff = bt12_regridded-bt108_regridded
-                #label_objects, nb_labels = ndi.label(btdiff)
-                #sizes = np.bincount(label_objects.ravel())
-
-                # Set clusters smaller than size 250 to zero
-                #mask_sizes = sizes > 250
-                #mask_sizes[0] = 0
-                #btdiff= mask_sizes[label_objects]
-
-                # Now try to get the sum of the X and Y gradients
-                lat_grad, lon_grad = np.gradient(btdiff)
-                total_grad = np.sqrt(lat_grad ** 2 + lon_grad ** 2)
-
-                sdf_now = sdf.variables['bt108'][0]
-                btdiff[sdf_now==1] = np.nan
-                #clouds_now[clouds_now == 1] = 0
-                #clouds_now[clouds_now == 3] = 0
-                #clouds_now[clouds_now == 2] = 1
-                #convolution = scipy.signal.convolve2d(clouds_now,
-                #                                      np.ones((10,
-                #                                               10)),
-                #                                      mode='same')
-                #clouds_now = convolution > 0
-                btdiff[clouds_now > 0] = np.nan
-
-                plt.close()
-
-                extent = (
-                np.min(cloud_lons), np.max(cloud_lons), np.min(cloud_lats), np.max(
-                    cloud_lats))
-                m = Basemap(projection='cyl', llcrnrlon=extent[0],
-                            urcrnrlon=extent[1],
-                            llcrnrlat=extent[2], urcrnrlat=extent[3],
-                            resolution='i')
-
-                m.drawcoastlines(linewidth=0.5)
-                m.drawcountries(linewidth=0.5)
-                parallels = np.arange(10., 40, 2.)
-                # labels = [left,right,top,bottom]
-                m.drawparallels(parallels, labels=[False, True, True, False],
-                                linewidth=0.5)
-                meridians = np.arange(-20., 17., 4.)
-                m.drawmeridians(meridians, labels=[True, False, False, True],
-                                linewidth=0.5)
-
-                btdiff = np.ma.masked_where(
-                    np.isnan(btdiff),
-                    btdiff)
-
-                min = -6
-                max = 3
-
-                levels = MaxNLocator(nbins=15).tick_values(min, max)
-
-                # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
-                cmap = cm.get_cmap('Blues')
-                norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
-
-                # m.pcolormesh(lons, lats, correlation_array, extent=extent,
-                #             origin='lower',
-                #         interpolation='none',
-                #         cmap=cmap, vmin=min, vmax=max+1)
-
-                m.pcolormesh(cloud_lons, cloud_lats, btdiff,
-                             cmap=cmap, vmin=min, vmax=max,norm=norm)
-
-                cbar = plt.colorbar(orientation='horizontal', fraction=0.056,
-                                    pad=0.06)
-                cbar.ax.set_xlabel('BT 12.0 - BT 10.8 (K)')
-                plt.tight_layout()
-                plt.savefig('BT_120_108_diff_'+datestrings[
-                    date_i]+'.png',
-                            bbox_inches='tight')
-
-                plt.close()
-            except:
-
-                if os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/'
-                                  '15-min/'
-                    '0.03x0.03/bt'
-                    '/nc/'
-                    +
-                    datetimes[date_i].strftime("%B").upper(
-                    ) + str(datetimes[date_i].year) + '/H-000-MSG1__'
-                                                      '-MSG1________-'
-                                        'IR_BrightnessTemperatures___'
-                                                      '-000005___-'
-                    + datestrings[date_i] +
-                    '-__.nc'):
                     bt = Dataset(
                         '/ouce-home/data/satellite/meteosat/seviri/15-min/'
+                        '0.03x0.03/bt'
+                        '/nc/'
+                        +
+                        datetimes[date_i].strftime("%B").upper(
+                        ) + str(datetimes[date_i].year) + '/H-000-MSG2__'
+                                                          '-MSG2________-'
+                                            'IR_BrightnessTemperatures___'
+                                                          '-000005___-'
+                        + datestrings[date_i] +
+                        '-__.nc')
+
+                    found_file = True
+
+                    #print bt12.shape
+                    #print clouds_now.shape
+                    #cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
+
+                except:
+
+                    if os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/'
+                                      '15-min/'
                         '0.03x0.03/bt'
                         '/nc/'
                         +
@@ -276,9 +178,22 @@ def wrapper(yearmonth):
                                             'IR_BrightnessTemperatures___'
                                                           '-000005___-'
                         + datestrings[date_i] +
-                        '-__.nc')
-                else:
-                    found_file = False
+                        '-__.nc'):
+                        bt = Dataset(
+                            '/ouce-home/data/satellite/meteosat/seviri/15-min/'
+                            '0.03x0.03/bt'
+                            '/nc/'
+                            +
+                            datetimes[date_i].strftime("%B").upper(
+                            ) + str(datetimes[date_i].year) + '/H-000-MSG1__'
+                                                              '-MSG1________-'
+                                                'IR_BrightnessTemperatures___'
+                                                              '-000005___-'
+                            + datestrings[date_i] +
+                            '-__.nc')
+                        found_file = True
+                    else:
+                        found_file = False
 
             if found_file:
 
@@ -301,15 +216,56 @@ def wrapper(yearmonth):
                 #    "%Y%m%d%H%M%S")+'.npy')
 
                 # Some SDF files have a time dimension. For these index it out.
-                if 'time' in sdf.variables:
+
+                if tch_sdfs:
+                    sdf_now = sdf.variables['SDF'][:]
+                elif 'time' in sdf.variables:
                     sdf_now = sdf.variables['bt108'][0]
                 else:
                     sdf_now = sdf.variables['bt108'][:]
 
-                if 'time' in bt.variables:
+                if daily_bt_files:
+
+                    # We should get data from the HDF files instead
+
+                    time_params_7dayw = np.array([window_datetime_lower.year,
+                                                  window_datetime_upper.year,
+                                                  window_datetime_lower.month,
+                                                  window_datetime_upper.month,
+                                                  window_datetime_lower.day,
+                                                  window_datetime_upper.day,
+                                                  datetimes[date_i].hour,
+                                                  datetimes[date_i].hour,
+                                                  datetimes[date_i].minute,
+                                                  datetimes[date_i].minute])
+
+                    datetimes_7dayw = utilities.get_daily_datetime_objects(
+                        time_params_7dayw)
+
+                    indices = np.arange(0, len(datetimes_7dayw))
+                    current_ind = datetimes_7dayw == datetimes[date_i]
+                    current_ind = indices[current_ind][0]
+
+                    f = tables.open_file(
+                        '/soge-home/projects/seviri_dust/sdf/intermediary_files/bt_15d_' +
+                        datetimes[date_i].strftime(
+                            "%Y_%H_%M") + '.hdf')
+                    bt_15day = f.root.data[current_ind]
+                    f.close()
+
+                    # We need to extract the right timestep from the daily
+                    # nc file
+
+                    bt_108 = bt_15day[1]
+
+                    # Instead get BTs from the intermediary hdf files (
+                    # already regridded)
+
+                elif 'time' in bt.variables:
                     bt_108 = bt.variables['bt108'][:][0]
                 else:
                     bt_108 = bt.variables['bt108'][:]
+
                 clouds = bt_108 < 270
 
                 # Add the reintroduced plumes back into the running
@@ -365,7 +321,8 @@ def wrapper(yearmonth):
 
                 # Then, for each new ID, we initialise plume objects
                 for i in np.arange(0, len(new_ids)):
-                    #print 'Creating new plume', new_ids[i]
+                    if debug:
+                        print 'Creating new plume', new_ids[i]
                     plume = plumes.Plume(new_ids[i], datetimes[date_i])
                     plume.update_position(lats, lons, sdf_plumes, new_ids[i])
                     plume.update_duration(datetimes[date_i])
@@ -382,9 +339,13 @@ def wrapper(yearmonth):
                     plume.update_most_likely_source()
                     # plume.update_leading_edge_4(sdf_plumes, lons, lats)
                     plume_objects[str(new_ids[i])] = plume
-                    missing_plume, missing_id, flickered = \
-                        plume.chain_flickerchecker(
-                        raw_sdf_prev)
+                    if flicker:
+                        missing_plume, missing_id, flickered = \
+                            plume.chain_flickerchecker(
+                            raw_sdf_prev)
+                    else:
+                        flickered = False
+                        missing_plume = []
                     if flickered:
                         raise ValueError('Found an overlaping plume in the '
                                          'previous timestep larger than size '
@@ -394,7 +355,8 @@ def wrapper(yearmonth):
                     # As long as there is an overlapping previous plume,
                     #  keep updating it back in time
                     while len(missing_plume) > 0:
-                        #print 'Rolling back plume', new_ids[i]
+                        if debug:
+                            print 'Rolling back plume', new_ids[i]
                         # We can only step back to the first timestep and no
                         # earlier
                         if (date_i - steps_back) < 0:
@@ -431,23 +393,30 @@ def wrapper(yearmonth):
                             # Pull out data from the timestep before to
                             # continue the chain
                             try:
-                                raw_sdf_prev_prev_data = Dataset(
-                                '/soge-home/data_not_backed_up/satellite/'
-                                'meteosat/'
-                                'seviri/'
-                                '15-min/0.03x0.03/sdf/nc/' +
-                                datetimes[date_i-steps_back].strftime(
-                                    "%B").upper(
-                                ) + str(datetimes[date_i-steps_back].year) +
-                                '/SDF_v2/SDF_v2.' + \
-                                datestrings[date_i-steps_back] + '.nc')
+                                if tch_sdfs:
+                                    raw_sdf_prev_prev_data = Dataset(sdf_root+'SDF_v2.' + \
+                                    datestrings[date_i-steps_back] + '.nc')
+                                else:
+                                    raw_sdf_prev_prev_data = Dataset(
+                                    '/soge-home/data_not_backed_up/satellite/'
+                                    'meteosat/'
+                                    'seviri/'
+                                    '15-min/0.03x0.03/sdf/nc/' +
+                                    datetimes[date_i-steps_back].strftime(
+                                        "%B").upper(
+                                    ) + str(datetimes[date_i-steps_back].year) +
+                                    '/SDF_v2/SDF_v2.' + \
+                                    datestrings[date_i-steps_back] + '.nc')
                             except:
                                 print 'Adding date to list of missing dates'
                                 with open('missing_dates.txt', 'a') as my_file:
                                     my_file.write('\n'+datestrings[date_i-
                                                               steps_back])
                                 break
-                            if 'time' in raw_sdf_prev_prev_data.variables:
+                            if tch_sdfs:
+                                raw_sdf_prev_prev = \
+                                    raw_sdf_prev_prev_data.variables['SDF'][:]
+                            elif 'time' in raw_sdf_prev_prev_data.variables:
                                 raw_sdf_prev_prev = \
                                     raw_sdf_prev_prev_data.variables[
                                         'bt108'][0]
@@ -614,7 +583,8 @@ def wrapper(yearmonth):
 
                 # For old IDs, we just run an update.
                 for i in np.arange(0, len(old_ids)):
-                    #print 'Updating plume', old_ids[i]
+                    if debug:
+                        print 'Updating plume', old_ids[i]
                     plume = plume_objects[str(old_ids[i])]
                     #if plume.plume_id == 2:
                     #    print plume.dates_observed
@@ -636,38 +606,6 @@ def wrapper(yearmonth):
                     # plume.update_leading_edge_4(sdf_plumes, lons, lats)
                     plume_objects[str(old_ids[i])] = plume
 
-                """
-
-                raw_sdf_prev = raw_sdf_prev == 1
-                clouds = clouds == 1
-
-                if prev_dust_assoc_clouds != None:
-                    dust_assoc_clouds = clouds & (raw_sdf_prev |
-                                                  prev_dust_assoc_clouds)
-
-                else:
-                    dust_assoc_clouds = clouds & raw_sdf_prev
-
-                plt.contourf(lons, lats, dust_assoc_clouds)
-                plt.savefig('clouds_' + datestrings[date_i] +
-                            '_buffer.png')
-                plt.close()
-                prev_dust_assoc_clouds = dust_assoc_clouds
-
-                plt.contourf(lons, lats, clouds)
-                plt.savefig('clouds_' + datestrings[date_i])
-                plt.close()
-
-                #plt.contourf(lons, lats, check_bool)
-                #plt.savefig('clouds_' + datestrings[date_i]+'_checkbool.png')
-                #plt.close()
-
-                plt.contourf(lons, lats, sdf_now)
-                plt.savefig('clouds_' + datestrings[date_i]+'sdf.png')
-                plt.close()
-
-                """
-
                 # Plumes which no longer exist are removed and archived
                 if len(ids_previous) == 0:
                     removed_ids = []
@@ -677,17 +615,14 @@ def wrapper(yearmonth):
                     removed_ids = ids_previous[removed_bool]
 
                 for i in np.arange(0, len(removed_ids)):
-                    #print 'Archiving plume', removed_ids[i]
+                    if debug:
+                        print 'Archiving plume', removed_ids[i]
                     plume = plume_objects[str(removed_ids[i])]
                     plume.update_GPE_speed()
                     # plume.update_mechanism_likelihood()
                     plume.update_mean_axis_offset()
                     plume.update_llj_probability(trace)
                     plume_archive[str(removed_ids[i])] = plume
-                    #print 'Plume', plume.plume_id,'removed. Final lons and \
-                    #                                             lats:'
-                    #print plume.centroid_lon
-                    #print plume.centroid_lat
                     del plume_objects[str(removed_ids[i])]
                     last_10_ids = np.append(last_10_ids, removed_ids[i])
 
@@ -702,11 +637,6 @@ def wrapper(yearmonth):
                     sdf_previous = sdf_plumes
                     ids_previous = plume_ids
                     raw_sdf_prev = sdf_now
-
-                # if runtime > datetime.timedelta(hours=0):
-                #    plotting.plot_plumes(plume_objects, sdf_plumes, lats, lons, bt,
-                #                         datetimes[date_i], datestrings[date_i])
-
             else:
                 print 'Adding date to list of missing dates'
                 with open('missing_dates.txt', 'a') as my_file:
@@ -729,9 +659,13 @@ def wrapper(yearmonth):
 if __name__ == '__main__':
 
     run = True
-    run_mcmc = False
-    no_trace = True
+    run_mcmc = True
+    no_trace = False
     pickup = False
+    daily_bt_files = False
+    tch_sdfs = False
+    flicker = True
+    debug = False
 
     if run_mcmc:
         data = get_llj_prob_model.create_plume_dataframe(
@@ -759,19 +693,28 @@ if __name__ == '__main__':
     # month_upper, year_lower, year_upper as an argument and specifying the
     # other time bounds
 
+    #sdf_root = '/soge-home/projects/seviri_dust/sdf/'
+    daily_bt_root = '/soge-home/projects/seviri_dust/raw_seviri_data/bt_nc/'
+
     years = [2004, 2005, 2006, 2007, 2008, 2009, 2010]
-    months = [[6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8],
-              [6, 7, 8]]
+    #years = [2011, 2012]
+    months = [[6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8],
+              [6, 7, 8], [6, 7, 8]]
+
+    #years = [2013, 2014, 2015, 2016, 2017]
+    years = [2004]
+    #months = [[6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8]]
+    months = [[6, 7, 8]]
     yearmonths = zip(years, months)
 
-    wrapper(yearmonths[6])
+    #wrapper(yearmonths[0])
+    #print 1/0
 
-    processes = [multiprocessing.Process(target=wrapper, args=(i,))
-                 for i in yearmonths]
-    for p in processes:
-        p.start()
-    for p in processes:
-        p.join()
+    pool = multiprocessing.Pool()
+    for i in yearmonths:
+        pool.apply_async(wrapper, args=(i,))
+    pool.close()
+    pool.join()
 
 
 

@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
+from netCDF4 import num2date
 import numpy as np
 from mpl_toolkits.basemap import Basemap
 import datetime
@@ -15,6 +16,7 @@ from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MaxNLocator
 import matplotlib.cm as cm
 import scipy.signal
+from pyresample import utils
 
 import utilities
 import plumes
@@ -28,8 +30,9 @@ def wrapper(yearmonth):
 
     year_lower = yearmonth[0]
     year_upper = yearmonth[0]
-    month_lower = yearmonth[1][0]
-    month_upper = yearmonth[1][-1]
+    month_lower = yearmonth[-1][0]
+    #month_lower = 7
+    month_upper = yearmonth[-1][-1]
     day_lower = 1
     day_upper = 31
     hour_lower = 0
@@ -86,7 +89,7 @@ def wrapper(yearmonth):
 
     cpo_archive = shelve.open(
         '/soge-home/projects/seviri_dust/plumetracker/'
-                                'cpo_archive_'
+                                'cpo_archive_v4'
         ''+str(yearmonth[0]))
 
     if pickup:
@@ -95,8 +98,11 @@ def wrapper(yearmonth):
             used_ids.append(int(i))
         with open('date_i_'+str(yearmonth[0])+'.txt', 'r') as f:
             pickup_date_i = f.read()
+        print 'Picking up from timestep', pickup_date_i
         datestrings = datestrings[int(pickup_date_i):]
         datetimes = datetimes[int(pickup_date_i):]
+
+    cpo_archive.close()
 
     year_lower = datetimes[0].year
     year_upper = datetimes[-1].year
@@ -121,99 +127,59 @@ def wrapper(yearmonth):
         print 'Generating cloud masks for all timesteps'
         # Loop through each time in a single day
 
-        processes = [multiprocessing.Process(target=cpo_detection.cloud_mask_mw,
-                                             args=(i, datetimes, oneday_datetimes))
-                     for i in np.arange(0, len(oneday_datetimes))]
-        for p in processes:
-            p.start()
-        for p in processes:
-            p.join()
+        pool = multiprocessing.Pool()
+        for i in np.arange(0, len(oneday_datetimes)):
+            pool.apply_async(cpo_detection.cloud_mask_mw, args=(i, datetimes,
+                                                 oneday_datetimes,
+                                            ianlons, ianlats))
+            # Pull a netCDF dataset object out so the projection coordinates can
+            # be obtained
+        pool.close()
+        pool.join()
 
     btdiff_2_anom_prev = None
     btdiff_2_anom_prev_2 = None
     btdiff_2_anom_prev_3 = None
 
     for date_i in np.arange(0, len(datestrings)):
+        cpo_archive = shelve.open(
+            '/soge-home/projects/seviri_dust/plumetracker/'
+            'cpo_archive_v4_'
+            '' + str(yearmonth[0]))
         runtime = datetimes[date_i] - datetimes[0]
         print '\n' + datestrings[date_i] + '\n'
         totaltest = datetime.datetime.now()
 
-        try:
-            bt = Dataset(
-                '/ouce-home/data/satellite/meteosat/seviri/15-min/'
-                '0.03x0.03/bt'
-                '/nc/'
-                +
-                datetimes[date_i].strftime("%B").upper(
-                ) + str(datetimes[date_i].year) + '/H-000-MSG2__'
-                                                  '-MSG2________-'
-                                    'IR_BrightnessTemperatures___'
-                                                  '-000005___-'
-                + datestrings[date_i] +
-                '-__.nc')
-
-            cloudmask = Dataset(
-                '/soge-home/data/satellite/meteosat/seviri/15-min/'
-                '0.03x0.03/cloudmask'
-                '/nc/'
-                +
-                datetimes[date_i].strftime("%B").upper(
-                ) + str(datetimes[date_i].year) + '_CLOUDS/eumetsat.cloud.'
-                + datestrings[date_i] + '.nc')
-            found_file = True
-
-        except:
-            if os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/'
-                              '15-min/'
-                              '0.03x0.03/bt'
-                              '/nc/'
-                                      +
-                                      datetimes[date_i].strftime("%B").upper(
-                                      ) + str(
-                datetimes[date_i].year) + '/H-000-MSG1__'
-                                          '-MSG1________-'
-                                          'IR_BrightnessTemperatures___'
-                                          '-000005___-'
-                                      + datestrings[date_i] +
-                                      '-__.nc'):
-                bt = Dataset(
-                    '/ouce-home/data/satellite/meteosat/seviri/15-min/'
-                    '0.03x0.03/bt'
-                    '/nc/'
-                    +
-                    datetimes[date_i].strftime("%B").upper(
-                    ) + str(datetimes[date_i].year) + '/H-000-MSG1__'
-                                                      '-MSG1________-'
-                                                      'IR_BrightnessTemperatures___'
-                                                      '-000005___-'
-                    + datestrings[date_i] +
-                    '-__.nc')
-                found_file = True
-            else:
-                found_file = False
-                print 'Found no BT/cloudmask file for this date!'
-
         if found_file:
 
-            if 'time' in bt.variables:
-                bt_108 = bt.variables['bt108'][:][0]
-            else:
-                bt_108 = bt.variables['bt108'][:]
-            clouds = bt_108 < 270
+            #if 'time' in bt.variables:
+            #    bt_108 = bt.variables['bt108'][:][0]
+            #else:
+            #    bt_108 = bt.variables['bt108'][:]
+            #clouds = bt_108 < 270
 
             # Here run CPO detection
             # IF A RAW DETECTED CPO FILE EXISTS, USE THAT (assuming the
             # algorithm hasn't changed)
-            cpo_now, btdiff_2_anom_prev, btdiff_2_anom_prev_2, \
-            btdiff_2_anom_prev_3 = cpo_detection.detect_cpo(
-                btdiff_2_anom_prev, btdiff_2_anom_prev_2,
-                       btdiff_2_anom_prev_3, datetimes, datestrings, date_i)
-
-            cpo_now[cpo_now > 0] = 1
+            if calculate_cpof:
+                cpo_now, btdiff_2_anom_prev, btdiff_2_anom_prev_2, \
+                btdiff_2_anom_prev_3 = cpo_detection.detect_cpo(
+                    btdiff_2_anom_prev, btdiff_2_anom_prev_2,
+                           btdiff_2_anom_prev_3, datetimes, datestrings, date_i,
+                    lons, lats,
+                    cloud_lons, cloud_lats,
+                    daily_cloudmask, double_digits, mesh, daily_bt)
+                cpo_now[cpo_now > 0] = 1
+            else:
+                cpo_data = Dataset(
+                    '/ouce-home/projects/seviri_dust/cpof/'+datetimes[
+                        date_i].strftime("%B%Y")+'/CPOF_'+datetimes[
+                        date_i].strftime("%Y%m%d%H%M")+'.nc')
+                cpo_now = cpo_data.variables['CPOF'][:]
 
             # Save the raw CPO detection to file
             # These should be stored in the project directory, not home
-            np.save('raw_detected_cpo_'+datestrings[date_i], cpo_now)
+            #np.save('raw_detected_cpo_'+datestrings[date_i], cpo_now)
 
             # Add the reintroduced plumes back into the running
             for i in np.arange(0, len(reintroduced_ids)):
@@ -227,8 +193,7 @@ def wrapper(yearmonth):
                 scan_for_blobs(
                 cpo_now,
                 cpo_previous,
-                used_ids,
-                clouds)
+                used_ids)
 
             #print 'New IDs', new_ids
 
@@ -253,7 +218,8 @@ def wrapper(yearmonth):
 
             # Then, for each new ID, we initialise plume objects
             for i in np.arange(0, len(new_ids)):
-                #print 'Creating new CPO', new_ids[i]
+                if debug:
+                    print 'Creating new CPO', new_ids[i]
                 cold_pool = cpo.CPO(new_ids[i], datetimes[date_i])
                 cold_pool.update_position(lats, lons, cpo_blobs, new_ids[i])
                 cold_pool.update_duration(datetimes[date_i])
@@ -266,7 +232,7 @@ def wrapper(yearmonth):
                 cold_pool.update_max_extent()
                 cold_pool.update_centroid_speed()
                 cold_pool.update_centroid_direction()
-                cold_pool.check_conv_distance(lats, lons, clouds)
+                #cold_pool.check_conv_distance(lats, lons, clouds)
                 cold_pool.update_most_likely_source()
                 # plume.update_leading_edge_4(sdf_plumes, lons, lats)
                 cpo_objects[str(new_ids[i])] = cold_pool
@@ -282,7 +248,8 @@ def wrapper(yearmonth):
                 # As long as there is an overlapping previous plume,
                 #  keep updating it back in time
                 while len(missing_cold_pool) > 0:
-                    #print 'Rolling back CPO', new_ids[i]
+                    if debug:
+                        print 'Rolling back CPO', new_ids[i]
                     # We can only step back to the first timestep and no
                     # earlier
                     if (date_i - steps_back) < 0:
@@ -307,7 +274,7 @@ def wrapper(yearmonth):
                         cold_pool.update_max_extent()
                         cold_pool.update_centroid_speed()
                         cold_pool.update_centroid_direction()
-                        cold_pool.check_conv_distance(lats, lons, clouds)
+                        #cold_pool.check_conv_distance(lats, lons, clouds)
                         cold_pool.update_most_likely_source()
                         cold_pool.process_missing_plume()
                         #print 'Updated missing plume back '+str(
@@ -481,7 +448,8 @@ def wrapper(yearmonth):
 
             # For old IDs, we just run an update.
             for i in np.arange(0, len(old_ids)):
-                #print 'Updating CPO', old_ids[i]
+                if debug:
+                    print 'Updating CPO', old_ids[i]
                 cold_pool = cpo_objects[str(old_ids[i])]
                 #if plume.plume_id == 2:
                 #    print plume.dates_observed
@@ -512,7 +480,8 @@ def wrapper(yearmonth):
                 removed_ids = ids_previous[removed_bool]
 
             for i in np.arange(0, len(removed_ids)):
-                #print 'Archiving CPO', removed_ids[i]
+                if debug:
+                    print 'Archiving CPO', removed_ids[i]
                 cold_pool = cpo_objects[str(removed_ids[i])]
                 cold_pool.update_GPE_speed()
                 # plume.update_mechanism_likelihood()
@@ -533,7 +502,6 @@ def wrapper(yearmonth):
                 #print plume.centroid_lon
                 #print plume.centroid_lat
 
-
             if len(last_10_ids) > 10:
                 last_10_ids = last_10_ids[0:10]
 
@@ -553,12 +521,7 @@ def wrapper(yearmonth):
 
         with open('date_i_'+str(yearmonth[0])+'.txt', 'w') as f:
             f.write('%d' % date_i)
-
-    # After the script has finished, add remaining plumes to the plume archive
-    for i in cpo_objects:
-        cpo_archive[i] = cpo_objects[i]
-
-    cpo_archive.close()
+        cpo_archive.close()
 
     # There seems to be a residual massive file - remove this
 
@@ -566,22 +529,64 @@ if __name__ == '__main__':
 
     pickup = False
     moving_window = False
+    calculate_cpof = False
+    daily_bt = False
+    daily_cloudmask = False
+    bt_root = ''
+    daily_cloudmask_root = '/soge-home/projects/seviri_dust/raw_seviri_data' \
+                           '/cloudmask_nc/'
+    debug = True
 
-    years = [2004, 2005, 2006, 2007, 2008, 2009, 2010]
-    months = [[6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8], [6, 7, 8],
-              [6, 7, 8]]
-    months = [[7], [7], [7], [7], [7], [7], [7]]
+    if daily_cloudmask:
+        double_digits = True # Set to True if using daily cloudmask
+        mesh = False# Set this to False if using daily cloudmask
+    else:
+        double_digits = False
+        mesh = True
+
+    # Get Ian's lats and lons
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    ianlons = sdf_test.variables['longitude'][:]
+    ianlats = sdf_test.variables['latitude'][:]
+
+    target_area = utils.load_area(
+            '/soge-home/projects/seviri_dust/areas.def',
+            'NorthAfrica')
+    cloud_lons, cloud_lats = target_area.get_lonlats()
+
+    # Get lats and lons
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
+
+    years = [2008, 2009, 2010]
+    months = [[6, 7, 8], [6, 7, 8], [6, 7, 8]]
+    years = [2009]
+    months = [[6, 7, 8]]
+    #months = [[7]]
+    #months = [[7], [7], [7], [7], [7], [7], [7]]
     yearmonths = zip(years, months)
 
     wrapper(yearmonths[0])
+    print 1/0
 
-    """
-    processes = [multiprocessing.Process(target=wrapper, args=(i,))
-                 for i in yearmonths]
-    for p in processes:
-        p.start()
-    for p in processes:
-        p.join()
-    """
+    pool = multiprocessing.Pool()
+    for i in yearmonths:
+        pool.apply_async(wrapper, args=(i,))
+        # Pull a netCDF dataset object out so the projection coordinates can
+        # be obtained
+    pool.close()
+    pool.join()
 
+    print 1/0
+
+    # 2007, 2010, 2009, 2006, 2008
 

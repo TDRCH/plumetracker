@@ -27,7 +27,7 @@ from skimage.measure import label, regionprops
 import utilities
 
 # Global function to scan the SDFs for unique plumes
-def scan_for_blobs(cpo_now, cpo_prev, used_ids, clouds):
+def scan_for_blobs(cpo_now, cpo_prev, used_ids):
     """
     Scans a set of SDFs for plumes and labels them
     :param SDF_now:
@@ -42,9 +42,9 @@ def scan_for_blobs(cpo_now, cpo_prev, used_ids, clouds):
         sizes = np.bincount(label_objects.ravel())
 
         # Set clusters smaller than size 50 to zero
-        mask_sizes = sizes > 50
-        mask_sizes[0] = 0
-        cpo_now = mask_sizes[label_objects]
+        #mask_sizes = sizes > 50
+        #mask_sizes[0] = 0
+        #cpo_now = mask_sizes[label_objects]
 
         cpo_clusters, num = measurements.label(cpo_now)
         if len(used_ids) > 0:
@@ -62,9 +62,9 @@ def scan_for_blobs(cpo_now, cpo_prev, used_ids, clouds):
         sizes = np.bincount(label_objects.ravel())
 
         # Set clusters smaller than size 50 to zero
-        mask_sizes = sizes > 50
-        mask_sizes[0] = 0
-        cpo_now = mask_sizes[label_objects]
+        #mask_sizes = sizes > 50
+        #mask_sizes[0] = 0
+        #cpo_now = mask_sizes[label_objects]
 
         cpo_clusters, num = measurements.label(cpo_now)
         plume_ids = np.unique(cpo_clusters)

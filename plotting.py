@@ -21,17 +21,39 @@ from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MaxNLocator
 import pandas as pd
 import seaborn
+from copy import deepcopy
+from pyresample import utils
+from skimage.morphology import skeletonize
 
 import pinkdust
 import utilities
 
-def plot_plume_overviews(plume_archive):
+def plot_cpofs():
     """
-    Plots plume overview plots for each timestep used in the plume archive
-    :param plume_archive:
+    Plots all CPOFs which contain a CPO
     :return:
     """
+    root = '/ouce-home/projects/seviri_dust/cpof/'
 
+    year_lower = 2011
+    year_upper = 2011
+    month_lower = 6
+    month_upper = 8
+    day_lower = 1
+    day_upper = 31
+    hour_lower = 0
+    hour_upper = 23
+    minute_lower = 0
+    minute_upper = 45
+
+    time_params = np.array([year_lower, year_upper, month_lower,
+                            month_upper, day_lower, day_upper,
+                            hour_lower, hour_upper, minute_lower,
+                            minute_upper])
+
+    datetimes = utilities.get_datetime_objects(time_params)
+
+    # Get lats and lons
     sdf_test = Dataset(
         '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
         '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
@@ -49,108 +71,1020 @@ def plot_plume_overviews(plume_archive):
     m.drawcoastlines(linewidth=0.5)
     m.drawcountries(linewidth=0.5)
 
-    # All you need is a list of IDs active for each datetime
-    date_dictionary = {}
+    parallels = np.arange(10., 40, 2.)
+    # labels = [left,right,top,bottom]
+    m.drawparallels(parallels, labels=[False, True, True, False],
+                    linewidth=0.5)
+    meridians = np.arange(-20., 17., 4.)
+    m.drawmeridians(meridians, labels=[True, False, False, True],
+                    linewidth=0.5)
 
-    for i in plume_archive:
-        if plume_archive[i].merged == True:
-            dates_observed = plume_archive[i].pre_merge_dates_observed
-            post_merge_dates = plume_archive[i].dates_observed
-            for j in post_merge_dates:
-                dates_observed.append(j)
+    for i in np.arange(0, len(datetimes)):
+        print datetimes[i]
+        cpof_dataset = Dataset(root+datetimes[i].strftime(
+            "%B%Y")+"/CPOF_"+datetimes[i].strftime("%Y%m%d%H%M")+".nc")
+        cpof_data = cpof_dataset.variables['CPOF'][:]
+        if 1 in cpof_data:
+            contourplot = m.contourf(lons, lats, cpof_data)
+            plt.savefig("CPOF_"+datetimes[i].strftime("%Y%m%d%H%M")+".png")
+            for coll in contourplot.collections:
+                coll.remove()
         else:
-            dates_observed = plume_archive[i].dates_observed
-        for j in dates_observed:
-            if j in date_dictionary:
-                date_dictionary[j].append(i)
-            else:
-                date_dictionary[j] = []
-                date_dictionary[j].append(i)
+            continue
+    plt.close()
 
-    total_dates = len(plume_archive)
-    plots_done = 0
+def plot_cpof_plume_cloud_overviews():
+    """
+    Plots CPOs, as well as dust and clouds
+    :return:
+    """
+    cpof_root = '/ouce-home/projects/seviri_dust/cpof/'
+    cloud_root = '/soge-home/data/satellite/meteosat/seviri/15-min/' \
+                 '0.03x0.03/cloudmask/nc/'
+    dust_root = '/soge-home/data_not_backed_up/satellite/meteosat/' \
+                'seviri/15-min/0.03x0.03/sdf/nc/'
 
-    # Then make one plot per date
-    for i in sorted(date_dictionary.keys()):
-        print i
-        print '\n\nProgress:', str(np.round((float(plots_done)/float(
-            total_dates))*100, 2))+'%\n\n'
-        plume_data = np.zeros((lats.shape[0], lons.shape[1]))
-        plume_data[:] = np.nan
-        centroid_lats = []
-        centroid_lons = []
-        plume_ids = []
+    year_lower = 2010
+    year_upper = 2010
+    month_lower = 6
+    month_upper = 8
+    day_lower = 1
+    day_upper = 31
+    hour_lower = 0
+    hour_upper = 23
+    minute_lower = 0
+    minute_upper = 45
 
-        active_plumes = date_dictionary[i]
+    time_params = np.array([year_lower, year_upper, month_lower,
+                            month_upper, day_lower, day_upper,
+                            hour_lower, hour_upper, minute_lower,
+                            minute_upper])
 
-        for j in active_plumes:
+    datetimes = utilities.get_datetime_objects(time_params)
 
-            print j
+    # Get lats and lons
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
 
-            if plume_archive[j].merged == True:
-                dates_observed = plume_archive[j].pre_merge_dates_observed
-                post_merge_dates = plume_archive[j].dates_observed
-                for k in post_merge_dates:
-                    dates_observed.append(k)
-            else:
-                dates_observed = plume_archive[j].dates_observed
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
 
-            date_bool = np.asarray(dates_observed) == i
+    # Get lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
 
-            plume_bools = np.asarray(plume_archive[j].track_plume_bool)
+    fig, ax = plt.subplots()
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
 
-            plume_bool = plume_bools[date_bool]
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
 
-            plume_bool = plume_bool[0].toarray()
+    for i in np.arange(0, len(datetimes)):
+        print datetimes[i]
+        cpof_dataset = Dataset(cpof_root + datetimes[i].strftime(
+            "%B%Y") + "/CPOF_" + datetimes[i].strftime("%Y%m%d%H%M") + ".nc")
+        cpof_data = cpof_dataset.variables['CPOF'][:]
 
-            plume_data[plume_bool] = plume_archive[j].LLJ_prob
+        sdf_dataset = Dataset(dust_root + datetimes[i].strftime("%B").upper(
+        )+datetimes[i].strftime("%Y")+"/SDF_v2/" + "SDF_v2."
+                              + datetimes[i].strftime("%Y%m%d%H%M") + ".nc")
+        if 'time' in sdf_dataset.variables:
+            sdf_data = sdf_dataset.variables['bt108'][0]
+        else:
+            sdf_data = sdf_dataset.variables['bt108'][:]
 
-            track_centroid_lats = plume_archive[j].track_centroid_lat
-            track_centroid_lons = plume_archive[j].track_centroid_lon
-            pre_merge_centroid_lats = plume_archive[
-                j].pre_merge_track_centroid_lat
-            pre_merge_centroid_lons = plume_archive[
-                j].pre_merge_track_centroid_lon
+        cloud_dataset = Dataset(cloud_root + datetimes[i].strftime("%B").upper(
+        )+datetimes[i].strftime("%Y")+"_CLOUDS/eumetsat.cloud."+
+                                datetimes[i].strftime("%Y%m%d%H%M")+".nc")
+        if 'time' in cloud_dataset.variables:
+            cloud_data = cloud_dataset.variables['cmask'][0]
+        else:
+            cloud_data = cloud_dataset.variables['cmask'][:]
 
-            if plume_archive[j].merged == False:
-                centroid_lat = np.asarray(track_centroid_lats)[date_bool][0]
-                centroid_lon = np.asarray(track_centroid_lons)[date_bool][0]
-            else:
-                combined_track_lat = np.append(pre_merge_centroid_lats,
-                                               track_centroid_lats)
-                combined_track_lon = np.append(pre_merge_centroid_lons,
-                                               track_centroid_lons)
-                centroid_lat = np.asarray(combined_track_lat)[date_bool][0]
-                centroid_lon = np.asarray(combined_track_lon)[date_bool][0]
+        cloud_data_regridded = pinkdust.regrid_data(cloud_lons, cloud_lats,
+                                                    lons, lats, cloud_data,
+                                                                mesh=True)
+        cpof_data = np.ma.masked_equal(cpof_data, 0)
+        sdf_data = np.ma.masked_equal(sdf_data, 0)
+        cloud_data_regridded = np.ma.masked_equal(cloud_data_regridded, 0)
+        cpof_contour = m.pcolormesh(lons, lats, cpof_data, cmap='Blues_r')
+        dust_contour = m.pcolormesh(lons, lats, sdf_data, cmap='Oranges_r')
+        cloud_contour = m.pcolormesh(lons, lats, cloud_data_regridded,
+                                   cmap='Greys')
+        plt.savefig('cpof_dust_cloud_overview_'+datetimes[i].strftime(
+            "%Y%m%d%H%M")+".png")
 
-            centroid_lats.append(centroid_lat)
-            centroid_lons.append(centroid_lon)
-            plume_ids.append(plume_archive[j].plume_id)
+        cpof_contour.remove()
+        dust_contour.remove()
+        cloud_contour.remove()
 
-        centroid_x, centroid_y = m(centroid_lons, centroid_lats)
-
-        levels = np.arange(0, 1.1, 0.1)
-        contourplot = m.contourf(lons, lats, plume_data, levels=levels)
-        centroidplot = m.scatter(centroid_x, centroid_y, s=1)
-
-        anns = []
-
-        for label_i, txt in enumerate(plume_ids):
-            ann = ax.annotate(txt, (centroid_x[label_i], centroid_y[
-                label_i]), fontsize=8)
-            anns.append(ann)
-
-        plt.savefig('CPO_overview_'+i.strftime(
-            "%Y%m%d%H%M")+'.png')
-
-        centroidplot.remove()
-        for coll in contourplot.collections:
+        """
+        for coll in cpof_contour.collections:
             coll.remove()
 
-        for ann in anns:
-            ann.remove()
+        for coll in dust_contour.collections:
+            coll.remove()
 
-        plots_done += 1
+        for coll in cloud_contour.collections:
+            coll.remove()
+        """
+
+    plt.close()
+
+def plot_plume_overviews():
+    """
+    Plots plume overview plots for each timestep used in the plume archive
+    :param plume_archive:
+    :return:
+    """
+
+    # Get plume archives
+    pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2004')
+    pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2005')
+    pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2006')
+    pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2007')
+    pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2008')
+    pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2009')
+    pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2010')
+    pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2011')
+    pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2012')
+    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                      pa2010, pa2011, pa2012]
+
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
+
+
+
+    # Get lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    lons, lats = np.meshgrid(cloud_lons, cloud_lats)
+
+    # Get cpo archives
+    ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2004')
+    ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2005')
+    ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2006')
+    ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2007')
+    ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2008')
+    ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2009')
+    ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2010')
+    cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010]
+
+    fig, ax = plt.subplots()
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    for plume_archive in plume_archives:
+        # All you need is a list of IDs active for each datetime
+        date_dictionary = {}
+
+        for i in plume_archive:
+            if plume_archive[i].merged == True:
+                dates_observed = plume_archive[i].pre_merge_dates_observed
+                post_merge_dates = plume_archive[i].dates_observed
+                for j in post_merge_dates:
+                    dates_observed.append(j)
+            else:
+                dates_observed = plume_archive[i].dates_observed
+            for j in dates_observed:
+                if j in date_dictionary:
+                    date_dictionary[j].append(i)
+                else:
+                    date_dictionary[j] = []
+                    date_dictionary[j].append(i)
+
+        total_dates = len(plume_archive)
+        plots_done = 0
+
+        # Then make one plot per date
+        for i in sorted(date_dictionary.keys()):
+            print i
+            print '\n\nProgress:', str(np.round((float(plots_done)/float(
+                total_dates))*100, 2))+'%\n\n'
+            plume_data = np.zeros((lats.shape[0], lons.shape[1]))
+            plume_data[:] = np.nan
+            centroid_lats = []
+            centroid_lons = []
+            plume_ids = []
+
+            active_plumes = date_dictionary[i]
+
+            for j in active_plumes:
+
+                print j
+
+                if plume_archive[j].merged == True:
+                    dates_observed = plume_archive[j].pre_merge_dates_observed
+                    post_merge_dates = plume_archive[j].dates_observed
+                    for k in post_merge_dates:
+                        dates_observed.append(k)
+                else:
+                    dates_observed = plume_archive[j].dates_observed
+
+                date_bool = np.asarray(dates_observed) == i
+
+                plume_bools = np.asarray(plume_archive[j].track_plume_bool)
+
+                plume_bool = plume_bools[date_bool]
+
+                plume_bool = plume_bool[0].toarray()
+
+                plume_data[plume_bool] = 1
+
+                track_centroid_lats = plume_archive[j].track_centroid_lat
+                track_centroid_lons = plume_archive[j].track_centroid_lon
+                pre_merge_centroid_lats = plume_archive[
+                    j].pre_merge_track_centroid_lat
+                pre_merge_centroid_lons = plume_archive[
+                    j].pre_merge_track_centroid_lon
+
+                if plume_archive[j].merged == False:
+                    centroid_lat = np.asarray(track_centroid_lats)[date_bool][0]
+                    centroid_lon = np.asarray(track_centroid_lons)[date_bool][0]
+                else:
+                    combined_track_lat = np.append(pre_merge_centroid_lats,
+                                                   track_centroid_lats)
+                    combined_track_lon = np.append(pre_merge_centroid_lons,
+                                                   track_centroid_lons)
+                    centroid_lat = np.asarray(combined_track_lat)[date_bool][0]
+                    centroid_lon = np.asarray(combined_track_lon)[date_bool][0]
+
+                centroid_lats.append(centroid_lat)
+                centroid_lons.append(centroid_lon)
+                plume_ids.append(plume_archive[j].plume_id)
+
+            centroid_x, centroid_y = m(centroid_lons, centroid_lats)
+
+            levels = np.arange(0, 1.1, 0.1)
+            contourplot = m.contourf(lons, lats, plume_data, levels=levels)
+            centroidplot = m.scatter(centroid_x, centroid_y, s=1)
+
+            anns = []
+
+            for label_i, txt in enumerate(plume_ids):
+                ann = ax.annotate(txt, (centroid_x[label_i], centroid_y[
+                    label_i]), fontsize=8)
+                anns.append(ann)
+
+            plt.savefig('plume_overview_'+i.strftime(
+                "%Y%m%d%H%M")+'.png')
+
+            centroidplot.remove()
+            for coll in contourplot.collections:
+                coll.remove()
+
+            for ann in anns:
+                ann.remove()
+
+            plots_done += 1
+
+def plot_cpo_skeleton_overviews():
+    """
+    Plots plume overview plots for each timestep used in the plume archive
+    :param plume_archive:
+    :return:
+    """
+
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
+
+    # Get lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    lons, lats = np.meshgrid(cloud_lons, cloud_lats)
+
+    # Get cpo archives
+    ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2004')
+    ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2005')
+    ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2006')
+    ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2007')
+    ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2008')
+    ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2009')
+    ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2010')
+    ca2011 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2011')
+    ca2012 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2012')
+    cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010,
+                    ca2011, ca2012]
+
+    fig, ax = plt.subplots()
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    for plume_archive in cpo_archives:
+        # All you need is a list of IDs active for each datetime
+        date_dictionary = {}
+
+        for i in plume_archive:
+            if plume_archive[i].merged == True:
+                dates_observed = plume_archive[i].pre_merge_dates_observed
+                post_merge_dates = plume_archive[i].dates_observed
+                for j in post_merge_dates:
+                    dates_observed.append(j)
+            else:
+                dates_observed = plume_archive[i].dates_observed
+            for j in dates_observed:
+                if j in date_dictionary:
+                    date_dictionary[j].append(i)
+                else:
+                    date_dictionary[j] = []
+                    date_dictionary[j].append(i)
+
+        total_dates = len(plume_archive)
+        plots_done = 0
+
+        # Then make one plot per date
+        for i in sorted(date_dictionary.keys()):
+            print i
+            print '\n\nProgress:', str(np.round((float(plots_done)/float(
+                total_dates))*100, 2))+'%\n\n'
+            plume_data = np.zeros((lats.shape[0], lons.shape[1]))
+            plume_data[:] = np.nan
+            centroid_lats = []
+            centroid_lons = []
+            plume_ids = []
+
+            active_plumes = date_dictionary[i]
+
+            for j in active_plumes:
+
+                print j
+
+                if plume_archive[j].merged == True:
+                    dates_observed = plume_archive[j].pre_merge_dates_observed
+                    post_merge_dates = plume_archive[j].dates_observed
+                    for k in post_merge_dates:
+                        dates_observed.append(k)
+                else:
+                    dates_observed = plume_archive[j].dates_observed
+
+                date_bool = np.asarray(dates_observed) == i
+
+                plume_bools = np.asarray(plume_archive[j].track_plume_bool)
+
+                plume_bool = plume_bools[date_bool]
+
+                plume_bool = plume_bool[0].toarray()
+
+                plume_data[plume_bool] = 1
+
+                track_centroid_lats = plume_archive[j].track_centroid_lat
+                track_centroid_lons = plume_archive[j].track_centroid_lon
+                pre_merge_centroid_lats = plume_archive[
+                    j].pre_merge_track_centroid_lat
+                pre_merge_centroid_lons = plume_archive[
+                    j].pre_merge_track_centroid_lon
+
+                if plume_archive[j].merged == False:
+                    centroid_lat = np.asarray(track_centroid_lats)[date_bool][0]
+                    centroid_lon = np.asarray(track_centroid_lons)[date_bool][0]
+                else:
+                    combined_track_lat = np.append(pre_merge_centroid_lats,
+                                                   track_centroid_lats)
+                    combined_track_lon = np.append(pre_merge_centroid_lons,
+                                                   track_centroid_lons)
+                    centroid_lat = np.asarray(combined_track_lat)[date_bool][0]
+                    centroid_lon = np.asarray(combined_track_lon)[date_bool][0]
+
+                centroid_lats.append(centroid_lat)
+                centroid_lons.append(centroid_lon)
+                plume_ids.append(plume_archive[j].plume_id)
+
+            centroid_x, centroid_y = m(centroid_lons, centroid_lats)
+
+            levels = np.arange(0, 1.1, 0.1)
+
+            # Skeletonise plume data
+            skeleton_data = skeletonize(plume_data)
+
+            contourplot = m.contourf(lons, lats, skeleton_data, levels=levels)
+            centroidplot = m.scatter(centroid_x, centroid_y, s=1)
+
+            anns = []
+
+            for label_i, txt in enumerate(plume_ids):
+                ann = ax.annotate(txt, (centroid_x[label_i], centroid_y[
+                    label_i]), fontsize=8)
+                anns.append(ann)
+
+            plt.savefig('CPO_skeleton_overview_'+i.strftime(
+                "%Y%m%d%H%M")+'.png')
+
+            centroidplot.remove()
+            for coll in contourplot.collections:
+                coll.remove()
+
+            for ann in anns:
+                ann.remove()
+
+            plots_done += 1
+
+def plot_cpo_dust_overviews():
+    """
+    Plots CPOs and contemporaneous dust along with its LLJ likelihood
+    :param plume_archive:
+    :return:
+    """
+
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
+
+    # Get lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
+
+    # Get cpo archives
+    ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2004')
+    ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2005')
+    ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2006')
+    ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2007')
+    ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2008')
+    ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2009')
+    ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2010')
+    cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010]
+
+    # Get plume archives
+    pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2004')
+    pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2005')
+    pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2006')
+    pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2007')
+    pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2008')
+    pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2009')
+    pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2010')
+    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009, pa2010]
+
+    fig, ax = plt.subplots()
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    for archive_i in np.arange(0, len(cpo_archives)):
+        # All you need is a list of IDs active for each datetime
+        date_dictionary = {}
+        plume_date_dictionary = {}
+
+        for i in plume_archives[archive_i]:
+            if plume_archives[archive_i][i].merged == True:
+                dates_observed = plume_archives[archive_i][i].pre_merge_dates_observed
+                post_merge_dates = plume_archives[archive_i][i].dates_observed
+                for j in post_merge_dates:
+                    dates_observed.append(j)
+            else:
+                dates_observed = plume_archives[archive_i][i].dates_observed
+            for j in dates_observed:
+                if j in plume_date_dictionary:
+                    plume_date_dictionary[j].append(i)
+                else:
+                    plume_date_dictionary[j] = []
+                    plume_date_dictionary[j].append(i)
+
+        for i in cpo_archives[archive_i]:
+            if cpo_archives[archive_i][i].merged == True:
+                dates_observed = cpo_archives[archive_i][i].pre_merge_dates_observed
+                post_merge_dates = cpo_archives[archive_i][i].dates_observed
+                for j in post_merge_dates:
+                    dates_observed.append(j)
+            else:
+                dates_observed = cpo_archives[archive_i][i].dates_observed
+            for j in dates_observed:
+                if j in date_dictionary:
+                    date_dictionary[j].append(i)
+                else:
+                    date_dictionary[j] = []
+                    date_dictionary[j].append(i)
+
+        total_dates = len(plume_archives[archive_i])
+        plots_done = 0
+
+        # Then make one plot per date
+        for i in sorted(date_dictionary.keys()):
+            plume_data = np.zeros((lats.shape[0], lons.shape[1]))
+            plume_data[:] = np.nan
+            centroid_lats = []
+            centroid_lons = []
+            plume_ids = []
+
+            cpo_data = np.zeros((cloud_lats.shape[0], cloud_lons.shape[1]))
+            cpo_data[:] = np.nan
+            cpo_centroid_lats = []
+            cpo_centroid_lons = []
+            cpo_ids = []
+
+            active_cpos = date_dictionary[i]
+            if i in plume_date_dictionary:
+                active_plumes = plume_date_dictionary[i]
+            else:
+                active_plumes = []
+
+            for j in active_cpos:
+
+                print j
+
+                cpo = cpo_archives[archive_i][j]
+
+                if cpo.merged == True:
+                    dates_observed = cpo.pre_merge_dates_observed
+                    post_merge_dates = cpo.dates_observed
+                    for k in post_merge_dates:
+                        dates_observed.append(k)
+                else:
+                    dates_observed = cpo.dates_observed
+
+                date_bool = np.asarray(dates_observed) == i
+
+                plume_bools = np.asarray(cpo.track_plume_bool)
+
+                plume_bool = plume_bools[date_bool]
+
+                plume_bool = plume_bool[0].toarray()
+
+                cpo_data[plume_bool] = 1
+
+                track_centroid_lats = cpo.track_centroid_lat
+                track_centroid_lons = cpo.track_centroid_lon
+                pre_merge_centroid_lats = cpo.pre_merge_track_centroid_lat
+                pre_merge_centroid_lons = cpo.pre_merge_track_centroid_lon
+
+                if cpo.merged == False:
+                    centroid_lat = np.asarray(track_centroid_lats)[date_bool][0]
+                    centroid_lon = np.asarray(track_centroid_lons)[date_bool][0]
+                else:
+                    combined_track_lat = np.append(pre_merge_centroid_lats,
+                                                   track_centroid_lats)
+                    combined_track_lon = np.append(pre_merge_centroid_lons,
+                                                   track_centroid_lons)
+                    centroid_lat = np.asarray(combined_track_lat)[date_bool][0]
+                    centroid_lon = np.asarray(combined_track_lon)[date_bool][0]
+
+                cpo_centroid_lats.append(centroid_lat)
+                cpo_centroid_lons.append(centroid_lon)
+                cpo_ids.append(cpo.plume_id)
+
+            for j in active_plumes:
+
+                print j
+
+                plume = plume_archives[archive_i][j]
+
+                if plume.merged == True:
+                    dates_observed = plume.pre_merge_dates_observed
+                    post_merge_dates = plume.dates_observed
+                    for k in post_merge_dates:
+                        dates_observed.append(k)
+                else:
+                    dates_observed = plume.dates_observed
+
+                date_bool = np.asarray(dates_observed) == i
+
+                plume_bools = np.asarray(plume.track_plume_bool)
+
+                plume_bool = plume_bools[date_bool]
+
+                plume_bool = plume_bool[0].toarray()
+
+                if plume.LLJ_prob != None:
+                    plume_data[plume_bool] = plume.LLJ_prob
+                else:
+                    plume_data[plume_bool] = 1
+
+                track_centroid_lats = plume.track_centroid_lat
+                track_centroid_lons = plume.track_centroid_lon
+                pre_merge_centroid_lats = plume.pre_merge_track_centroid_lat
+                pre_merge_centroid_lons = plume.pre_merge_track_centroid_lon
+
+                if plume.merged == False:
+                    centroid_lat = np.asarray(track_centroid_lats)[date_bool][0]
+                    centroid_lon = np.asarray(track_centroid_lons)[date_bool][0]
+                else:
+                    combined_track_lat = np.append(pre_merge_centroid_lats,
+                                                   track_centroid_lats)
+                    combined_track_lon = np.append(pre_merge_centroid_lons,
+                                                   track_centroid_lons)
+                    centroid_lat = np.asarray(combined_track_lat)[date_bool][0]
+                    centroid_lon = np.asarray(combined_track_lon)[date_bool][0]
+
+                centroid_lats.append(centroid_lat)
+                centroid_lons.append(centroid_lon)
+                plume_ids.append(plume.plume_id)
+
+            centroid_x, centroid_y = m(cpo_centroid_lons, cpo_centroid_lats)
+
+            levels = np.arange(0, 1.1, 0.1)
+            contourplot1 = m.contourf(cloud_lons, cloud_lats, cpo_data, \
+                                            levels=levels,
+                                      cmap='Blues')
+            centroidplot1 = m.scatter(centroid_x, centroid_y, s=1)
+
+            anns1 = []
+
+            for label_i, txt in enumerate(cpo_ids):
+                ann = ax.annotate(txt, (centroid_x[label_i], centroid_y[
+                    label_i]), fontsize=8)
+                anns1.append(ann)
+
+            centroid_x, centroid_y = m(centroid_lons, centroid_lats)
+
+            levels = np.arange(0, 1.1, 0.1)
+            contourplot = m.contourf(lons, lats, plume_data, levels=levels)
+            centroidplot = m.scatter(centroid_x, centroid_y, s=1)
+
+            anns = []
+
+            for label_i, txt in enumerate(plume_ids):
+                ann = ax.annotate(txt, (centroid_x[label_i], centroid_y[
+                    label_i]), fontsize=8)
+                anns.append(ann)
+
+            plt.savefig('CPO_dust_overview_'+i.strftime(
+                "%Y%m%d%H%M")+'.png')
+
+            centroidplot.remove()
+            for coll in contourplot.collections:
+                coll.remove()
+
+            centroidplot1.remove()
+            for coll in contourplot1.collections:
+                coll.remove()
+
+            for ann in anns:
+                ann.remove()
+
+            for ann in anns1:
+                ann.remove()
+
+            plots_done += 1
+
+def plot_cpo_dust_cloud_overviews():
+    """
+    Plots CPOs and contemporaneous dust along with its LLJ likelihood
+    :param plume_archive:
+    :return:
+    """
+
+    # This one needs to loop through active dust plumes rather than active CPOs
+    # Then extract the cloud from file for that date. It would be nice if we
+    #  had this in an intermediary file rather than having to regrid...
+    # We could work out the cloud mask from the cloudmasked_BT couldn't we?
+    # Just look for nans and bob's your uncle - yeah there shouln't be any
+    # nans in the unmasked stuff
+
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
+
+    # Get lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
+
+    # Get cpo archives
+    ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2004')
+    ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2005')
+    ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2006')
+    ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2007')
+    ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2008')
+    ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2009')
+    ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2010')
+    cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010]
+
+    # Get plume archives
+    pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2004')
+    pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2005')
+    pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2006')
+    pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2007')
+    pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2008')
+    pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2009')
+    pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v2_2010')
+    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009, pa2010]
+
+    fig, ax = plt.subplots()
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+
+    for archive_i in np.arange(0, len(cpo_archives)):
+        # All you need is a list of IDs active for each datetime
+        date_dictionary = {}
+        plume_date_dictionary = {}
+
+        for i in plume_archives[archive_i]:
+            if plume_archives[archive_i][i].merged == True:
+                dates_observed = plume_archives[archive_i][i].pre_merge_dates_observed
+                post_merge_dates = plume_archives[archive_i][i].dates_observed
+                for j in post_merge_dates:
+                    dates_observed.append(j)
+            else:
+                dates_observed = plume_archives[archive_i][i].dates_observed
+            for j in dates_observed:
+                if j in plume_date_dictionary:
+                    plume_date_dictionary[j].append(i)
+                else:
+                    plume_date_dictionary[j] = []
+                    plume_date_dictionary[j].append(i)
+
+        for i in cpo_archives[archive_i]:
+            if cpo_archives[archive_i][i].merged == True:
+                dates_observed = cpo_archives[archive_i][i].pre_merge_dates_observed
+                post_merge_dates = cpo_archives[archive_i][i].dates_observed
+                for j in post_merge_dates:
+                    dates_observed.append(j)
+            else:
+                dates_observed = cpo_archives[archive_i][i].dates_observed
+            for j in dates_observed:
+                if j in date_dictionary:
+                    date_dictionary[j].append(i)
+                else:
+                    date_dictionary[j] = []
+                    date_dictionary[j].append(i)
+
+        total_dates = len(plume_archives[archive_i])
+        plots_done = 0
+
+        # Then make one plot per date
+        for i in sorted(date_dictionary.keys()):
+            plume_data = np.zeros((lats.shape[0], lons.shape[1]))
+            plume_data[:] = np.nan
+            centroid_lats = []
+            centroid_lons = []
+            plume_ids = []
+
+            cpo_data = np.zeros((cloud_lats.shape[0], cloud_lons.shape[1]))
+            cpo_data[:] = np.nan
+            cpo_centroid_lats = []
+            cpo_centroid_lons = []
+            cpo_ids = []
+
+            active_cpos = date_dictionary[i]
+            if i in plume_date_dictionary:
+                active_plumes = plume_date_dictionary[i]
+            else:
+                active_plumes = []
+
+            for j in active_cpos:
+
+                cpo = cpo_archives[archive_i][j]
+
+                if cpo.merged == True:
+                    dates_observed = cpo.pre_merge_dates_observed
+                    post_merge_dates = cpo.dates_observed
+                    for k in post_merge_dates:
+                        dates_observed.append(k)
+                else:
+                    dates_observed = cpo.dates_observed
+
+                date_bool = np.asarray(dates_observed) == i
+
+                plume_bools = np.asarray(cpo.track_plume_bool)
+
+                plume_bool = plume_bools[date_bool]
+
+                plume_bool = plume_bool[0].toarray()
+
+                cpo_data[plume_bool] = 1
+
+                track_centroid_lats = cpo.track_centroid_lat
+                track_centroid_lons = cpo.track_centroid_lon
+                pre_merge_centroid_lats = cpo.pre_merge_track_centroid_lat
+                pre_merge_centroid_lons = cpo.pre_merge_track_centroid_lon
+
+                if cpo.merged == False:
+                    centroid_lat = np.asarray(track_centroid_lats)[date_bool][0]
+                    centroid_lon = np.asarray(track_centroid_lons)[date_bool][0]
+                else:
+                    combined_track_lat = np.append(pre_merge_centroid_lats,
+                                                   track_centroid_lats)
+                    combined_track_lon = np.append(pre_merge_centroid_lons,
+                                                   track_centroid_lons)
+                    centroid_lat = np.asarray(combined_track_lat)[date_bool][0]
+                    centroid_lon = np.asarray(combined_track_lon)[date_bool][0]
+
+                cpo_centroid_lats.append(centroid_lat)
+                cpo_centroid_lons.append(centroid_lon)
+                cpo_ids.append(cpo.plume_id)
+
+            for j in active_plumes:
+
+                plume = plume_archives[archive_i][j]
+
+                if plume.merged == True:
+                    dates_observed = plume.pre_merge_dates_observed
+                    post_merge_dates = plume.dates_observed
+                    for k in post_merge_dates:
+                        dates_observed.append(k)
+                else:
+                    dates_observed = plume.dates_observed
+
+                date_bool = np.asarray(dates_observed) == i
+
+                plume_bools = np.asarray(plume.track_plume_bool)
+
+                plume_bool = plume_bools[date_bool]
+
+                plume_bool = plume_bool[0].toarray()
+
+                if plume.LLJ_prob != None:
+                    plume_data[plume_bool] = plume.LLJ_prob
+                else:
+                    plume_data[plume_bool] = 1
+
+                track_centroid_lats = plume.track_centroid_lat
+                track_centroid_lons = plume.track_centroid_lon
+                pre_merge_centroid_lats = plume.pre_merge_track_centroid_lat
+                pre_merge_centroid_lons = plume.pre_merge_track_centroid_lon
+
+                if plume.merged == False:
+                    centroid_lat = np.asarray(track_centroid_lats)[date_bool][0]
+                    centroid_lon = np.asarray(track_centroid_lons)[date_bool][0]
+                else:
+                    combined_track_lat = np.append(pre_merge_centroid_lats,
+                                                   track_centroid_lats)
+                    combined_track_lon = np.append(pre_merge_centroid_lons,
+                                                   track_centroid_lons)
+                    centroid_lat = np.asarray(combined_track_lat)[date_bool][0]
+                    centroid_lon = np.asarray(combined_track_lon)[date_bool][0]
+
+                centroid_lats.append(centroid_lat)
+                centroid_lons.append(centroid_lon)
+                plume_ids.append(plume.plume_id)
+
+            centroid_x, centroid_y = m(cpo_centroid_lons, cpo_centroid_lats)
+
+            levels = np.arange(0, 1.1, 0.1)
+            contourplot1 = m.contourf(cloud_lons, cloud_lats, cpo_data, \
+                                            levels=levels,
+                                      cmap='Blues')
+            centroidplot1 = m.scatter(centroid_x, centroid_y, s=1)
+
+            anns1 = []
+
+            for label_i, txt in enumerate(cpo_ids):
+                ann = ax.annotate(txt, (centroid_x[label_i], centroid_y[
+                    label_i]), fontsize=8)
+                anns1.append(ann)
+
+            centroid_x, centroid_y = m(centroid_lons, centroid_lats)
+
+            levels = np.arange(0, 1.1, 0.1)
+            contourplot = m.contourf(lons, lats, plume_data, levels=levels)
+            centroidplot = m.scatter(centroid_x, centroid_y, s=1)
+
+            anns = []
+
+            for label_i, txt in enumerate(plume_ids):
+                ann = ax.annotate(txt, (centroid_x[label_i], centroid_y[
+                    label_i]), fontsize=8)
+                anns.append(ann)
+
+            plt.savefig('CPO_dust_overview_'+i.strftime(
+                "%Y%m%d%H%M")+'.png')
+
+            centroidplot.remove()
+            for coll in contourplot.collections:
+                coll.remove()
+
+            centroidplot1.remove()
+            for coll in contourplot1.collections:
+                coll.remove()
+
+            for ann in anns:
+                ann.remove()
+
+            for ann in anns1:
+                ann.remove()
+
+            plots_done += 1
 
 def plot_plumes(plume_objects, sdf_plumes, lats, lons, bt, datetime, \
                                           datestring):
@@ -215,7 +1149,7 @@ def plot_plumes(plume_objects, sdf_plumes, lats, lons, bt, datetime, \
     plt.close()
 
 def plot_existing_SDF():
-    root = './raw_detected_cpo/2010/'
+    root = '/soge-home/projects/seviri_dust/sdf/June2014/'
     cloud_test = Dataset(
         '/soge-home/data/satellite/meteosat/seviri/15-min/'
         '0.03x0.03/cloudmask'
@@ -226,6 +1160,16 @@ def plot_existing_SDF():
     lons = cloud_test.variables['lon'][:]
     lats = cloud_test.variables['lat'][:]
     lons, lats = np.meshgrid(lons, lats)
+
+    # Get Ian's lats and lons
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    ianlons = sdf_test.variables['longitude'][:]
+    ianlats = sdf_test.variables['latitude'][:]
+    lons, lats = np.meshgrid(ianlons, ianlats)
 
     extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
     m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
@@ -240,10 +1184,10 @@ def plot_existing_SDF():
 
     for item in filelist:
         if os.path.isfile(os.path.join(root, item)):
-            #SDF = Dataset(root + str(item))
-            cpo = np.load(root+str(item))
-            #c = m.contourf(lons, lats, SDF.variables['bt108'][:])
-            c = m.contourf(lons, lats, cpo)
+            SDF = Dataset(root + str(item))
+            #cpo = np.load(root+str(item))
+            c = m.contourf(lons, lats, SDF.variables['SDF'][:])
+            #c = m.contourf(lons, lats, cpo)
             plt.savefig(str(item)[:-3] + '.png')
             print str(item)[:-3]
             for coll in c.collections:
@@ -1152,7 +2096,8 @@ def plot_llj_prob_map(plume_archive, lats, lons, min_lat=None,
 
 def plot_multiyear_llj_prob_map(min_lat=None,
                             min_lon=None,
-                    max_lat=None, max_lon=None, res=50, pre_calculated=False):
+                    max_lat=None, max_lon=None, res=100,
+                                pre_calculated=False):
     # First we need a grid on which to map all our speeds
     # This can come from lats and lons
     # Second, you set that grid to a whole pile of nans
@@ -1193,12 +2138,13 @@ def plot_multiyear_llj_prob_map(min_lat=None,
         m.drawmeridians(meridians, labels=[True, False, False, True],
                         linewidth=0.5)
 
-        prob_array = np.load('llj_prob_array_v3.npy')
-        counts_array = np.load('multiyear_dust_frequency_array.npy')
+        prob_array = np.load('llj_prob_array_v4.npy')
+        counts_array = np.load('multiyear_dust_frequency_array_noflicker.npy')
 
-        prob_array[counts_array < 2] = np.nan
+        prob_array[counts_array < 3] = np.nan
 
-        discrete_cmap = utilities.cmap_discretize(cm.YlGnBu, 10)
+        discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+        discrete_cmap = utilities.cmap_discretize(cm.Blues, 10)
         m.imshow(prob_array, extent=extent, origin='lower',
                  interpolation='none',
                  cmap=discrete_cmap, vmin=0, vmax=1)
@@ -1211,13 +2157,62 @@ def plot_multiyear_llj_prob_map(min_lat=None,
                             ticks=ticks)
         cbar.ax.set_xlabel('Mean LLJ probability')
         plt.tight_layout()
-        plt.savefig('LLJ_prob_map_v3_halfres_masked.png', bbox_inches='tight')
+        plt.savefig('LLJ_prob_map_v6_altcm_masked_1.png', bbox_inches='tight')
 
         plt.close()
 
     else:
 
-        # Get lats and lons
+        # Get cpo archives
+        ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2004')
+        ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2005')
+        ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2006')
+        ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2007')
+        ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2008')
+        ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2009')
+        ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2010')
+        #cpo_archives = [ca2005, ca2006, ca2007, ca2008, ca2009, ca2010]
+
+        # Get plume archives
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2012')
+        pa2013 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2013')
+        pa2014 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2014')
+        pa2015 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2015')
+        pa2016 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2016')
+        pa2017 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2017')
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012, pa2013, pa2014, pa2015,
+                          pa2016, pa2017]
+
         sdf_test = Dataset(
             '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
             '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
@@ -1229,42 +2224,59 @@ def plot_multiyear_llj_prob_map(min_lat=None,
         linlats = np.linspace(np.min(lats), np.max(lats), res)
         linlons = np.linspace(np.min(lons), np.max(lons), res)
 
-        lons, lats = np.meshgrid(linlons, linlats)
+        linlons, linlats = np.meshgrid(linlons, linlats)
 
-        # Get plume archives
-        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                             'plume_archive_flicker_v3_prob_v3_2004')
-        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                             'plume_archive_flicker_v3_prob_v3_2005')
-        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                             'plume_archive_flicker_v3_prob_v3_2006')
-        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                             'plume_archive_flicker_v3_prob_v3_2007')
-        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                             'plume_archive_flicker_v3_prob_v3_2008')
-        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                             'plume_archive_flicker_v3_prob_v3_2009')
-        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                             'plume_archive_flicker_v3_prob_v3_2010')
-        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009, pa2010]
+        # Get lats and lons
+        cloud_test = Dataset(
+            '/soge-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/cloudmask'
+            '/nc/'
+            +
+            'JUNE2010_CLOUDS/eumetsat.cloud.'
+            + '201006031500.nc')
+        cloud_lons = cloud_test.variables['lon'][:]
+        cloud_lats = cloud_test.variables['lat'][:]
+        #cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
 
         plt.close()
 
         fig, ax = plt.subplots()
 
-        lats = np.linspace(np.min(lats), np.max(lats), res)
-        lons = np.linspace(np.min(lons), np.max(lons), res)
+        #lons, lats = np.meshgrid(lons, lats)
+        """
+        print 'Processing CPO dates'
+        for archive_i in np.arange(0, len(cpo_archives)):
+            # All you need is a list of IDs active for each datetime
+            date_dictionary = {}
 
-        lons, lats = np.meshgrid(lons, lats)
+            for i in cpo_archives[archive_i]:
+                if cpo_archives[archive_i][i].merged == True:
+                    dates_observed = cpo_archives[archive_i][
+                        i].pre_merge_dates_observed
+                    post_merge_dates = cpo_archives[archive_i][
+                        i].dates_observed
+                    for j in post_merge_dates:
+                        dates_observed.append(j)
+                else:
+                    dates_observed = cpo_archives[archive_i][i].dates_observed
+                for j in dates_observed:
+                    if j in date_dictionary:
+                        date_dictionary[j].append(i)
+                    else:
+                        date_dictionary[j] = []
+                        date_dictionary[j].append(i)
+
+        """
 
         archive_idx = 1
 
-        data_array = np.zeros((lons.shape))
-        prob_array = np.zeros((lons.shape))
+        data_array = np.zeros((linlons.shape))
+        prob_array = np.zeros((linlons.shape))
+
+        print cloud_lons.shape
 
         for plume_archive in plume_archives:
             print 'Plume archive', archive_idx
-            archive_idx += 1
             archive_size = len(plume_archive)
             plume_idx = 1
             used_percentages = []
@@ -1291,8 +2303,50 @@ def plot_multiyear_llj_prob_map(min_lat=None,
                 if plume.LLJ_prob == None:
                     continue
 
-                lat_diff = np.abs(lats - emission_lat)
-                lon_diff = np.abs(lons - emission_lon)
+                emission_time = plume.emission_time
+                if emission_time.hour < 3 or emission_time.hour > 16:
+                    llj_prob = 0
+
+                emission_bool = plume.track_plume_bool[0].toarray()
+                """
+                for date in plume.dates_observed:
+                    cpo_sweeps = np.zeros((cloud_lats.shape[0],
+                                           cloud_lons.shape[0]))
+                    if date in date_dictionary:
+                        active_cpos = date_dictionary[date]
+                        for j in np.arange(0, len(active_cpos)):
+                            cpo_i = active_cpos[j]
+                            cpo = cpo_archives[archive_idx - 1][cpo_i]
+                            cpo_dates = cpo.dates_observed
+                            cpo_index_bool = np.asarray([k <= date for k in
+                                                         cpo_dates])
+                            cpo_bools_to_date = np.asarray(
+                                cpo.track_plume_bool)[
+                                cpo_index_bool]
+                            cpo_bools_to_date = np.asarray(
+                                [k.toarray() for k in
+                                 cpo_bools_to_date])
+                            # Find the union of all CPO bools to date
+                            cpo_sweep = np.sum(cpo_bools_to_date, axis=0)
+                            cpo_sweep = cpo_sweep > 0
+                            cpo_sweeps += cpo_sweep
+
+                        emission_bool_regridded = pinkdust.regrid_data(lons,
+                                                                       lats,
+                                                                       cloud_lons,
+                                                                       cloud_lats,
+                                                                       emission_bool)
+
+                        if np.any(emission_bool_regridded & (cpo_sweeps==1)):
+                            # An overlap between the emitted plume and a CPO sweep
+                            plume.archive_LLJ_prob = deepcopy(plume.LLJ_prob)
+                            llj_prob = 0
+                            break
+
+                """
+
+                lat_diff = np.abs(linlats - emission_lat)
+                lon_diff = np.abs(linlons - emission_lon)
                 lat_bool = lat_diff == lat_diff.min()
                 lon_bool = lon_diff == lon_diff.min()
                 union_bool = lat_bool & lon_bool
@@ -1300,13 +2354,15 @@ def plot_multiyear_llj_prob_map(min_lat=None,
                 data_array[union_bool] += 1
                 prob_array[union_bool] += llj_prob
 
+            archive_idx += 1
+
         # Find the nearest latlon for each dictionary key, and extract the index
         # for it
 
-        data_array[data_array == 0] = np.nan
+        #data_array[data_array == 0] = np.nan
         prob_array = prob_array/data_array
 
-        np.save('llj_prob_array_v3', prob_array)
+        np.save('llj_prob_array_v7', prob_array)
 
         extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
         m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
@@ -1333,7 +2389,294 @@ def plot_multiyear_llj_prob_map(min_lat=None,
                      ticks=ticks)
         cbar.ax.set_xlabel('Mean LLJ probability')
         plt.tight_layout()
-        plt.savefig('LLJ_prob_map_v3_halfres.png', bbox_inches='tight')
+        plt.savefig('LLJ_prob_map_v7_2004_2017.png', bbox_inches='tight')
+
+        plt.close()
+
+def plot_multiyear_llj_prob_map_std(min_lat=None,
+                            min_lon=None,
+                    max_lat=None, max_lon=None, res=100,
+                                pre_calculated=False):
+    # First we need a grid on which to map all our speeds
+    # This can come from lats and lons
+    # Second, you set that grid to a whole pile of nans
+    # Then you write all your speed values to a nice dictionary
+    # Then when you have your dictionary, average each entry
+    # Then for each latlon tuple, bin it to the nearest latlon on the grid
+    # and write that to the array of nans
+    # Then you do like imshow or something, but you'd have to get regular
+    # latlons probably, unless there's some other grid plotting method which
+    # allows regular latlons
+
+    if pre_calculated:
+        # Get lats and lons
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
+
+        linlats = np.linspace(np.min(lats), np.max(lats), res)
+        linlons = np.linspace(np.min(lons), np.max(lons), res)
+
+        lons, lats = np.meshgrid(linlons, linlats)
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 4.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        prob_array = np.load('llj_prob_array_v4.npy')
+        counts_array = np.load('multiyear_dust_frequency_array.npy')
+
+        #prob_array[counts_array < 2] = np.nan
+
+        discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+        m.imshow(prob_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap)#, vmin=0, vmax=1)
+
+        #m.contourf(lons, lats, prob_array, cmap='YlGnBu', levels=np.arange(0,
+        #           1.1, 0.1))
+
+        #ticks = np.arange(0, 1.1, 0.1)
+        cbar = plt.colorbar(orientation='horizontal', fraction=0.056,
+                            pad=0.06)#,ticks=ticks)
+        cbar.ax.set_xlabel('Mean LLJ probability StD')
+        plt.tight_layout()
+        plt.savefig('LLJ_prob_map_v5_std.png', bbox_inches='tight')
+
+        plt.close()
+
+    else:
+
+        # Get cpo archives
+        ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2004')
+        ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2005')
+        ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2006')
+        ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2007')
+        ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2008')
+        ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2009')
+        ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_2010')
+        #cpo_archives = [ca2005, ca2006, ca2007, ca2008, ca2009, ca2010]
+
+        # Get plume archives
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2012')
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012]
+
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
+
+        linlats = np.linspace(np.min(lats), np.max(lats), res)
+        linlons = np.linspace(np.min(lons), np.max(lons), res)
+
+        linlons, linlats = np.meshgrid(linlons, linlats)
+
+        # Get lats and lons
+        cloud_test = Dataset(
+            '/soge-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/cloudmask'
+            '/nc/'
+            +
+            'JUNE2010_CLOUDS/eumetsat.cloud.'
+            + '201006031500.nc')
+        cloud_lons = cloud_test.variables['lon'][:]
+        cloud_lats = cloud_test.variables['lat'][:]
+        #cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
+
+        plt.close()
+
+        fig, ax = plt.subplots()
+
+        #lons, lats = np.meshgrid(lons, lats)
+        """
+        print 'Processing CPO dates'
+        for archive_i in np.arange(0, len(cpo_archives)):
+            # All you need is a list of IDs active for each datetime
+            date_dictionary = {}
+
+            for i in cpo_archives[archive_i]:
+                if cpo_archives[archive_i][i].merged == True:
+                    dates_observed = cpo_archives[archive_i][
+                        i].pre_merge_dates_observed
+                    post_merge_dates = cpo_archives[archive_i][
+                        i].dates_observed
+                    for j in post_merge_dates:
+                        dates_observed.append(j)
+                else:
+                    dates_observed = cpo_archives[archive_i][i].dates_observed
+                for j in dates_observed:
+                    if j in date_dictionary:
+                        date_dictionary[j].append(i)
+                    else:
+                        date_dictionary[j] = []
+                        date_dictionary[j].append(i)
+
+        """
+
+        archive_idx = 1
+
+        data_array = np.zeros((linlons.shape))
+        prob_array = np.zeros((linlons.shape))
+
+        print cloud_lons.shape
+
+        for plume_archive in plume_archives:
+            print 'Plume archive', archive_idx
+            archive_size = len(plume_archive)
+            plume_idx = 1
+            used_percentages = []
+            for i in plume_archive:
+                if int((float(plume_idx) / float(
+                        archive_size)) * 100) % 10 == 0 and int((float(
+                    plume_idx) / float(archive_size)) * 100) not in \
+                        used_percentages:
+                    print str(int((float(plume_idx) / float(
+                        archive_size)) * 100)) + "%"
+                    # This percentage has been printed already
+                    used_percentages.append(int((float(plume_idx) / float(
+                        archive_size)) * 100))
+                plume_idx += 1
+                # If the plume has merged, the plume source is found in the
+                # pre-merge track
+
+                plume = plume_archive[i]
+
+                emission_lat = plume.track_centroid_lat[0]
+                emission_lon = plume.track_centroid_lon[0]
+                llj_prob = plume.LLJ_prob_std
+
+                if plume.LLJ_prob == np.nan:
+                    continue
+
+                emission_time = plume.emission_time
+                if emission_time.hour < 3 or emission_time.hour > 16:
+                    llj_prob = 0
+
+                emission_bool = plume.track_plume_bool[0].toarray()
+                """
+                for date in plume.dates_observed:
+                    cpo_sweeps = np.zeros((cloud_lats.shape[0],
+                                           cloud_lons.shape[0]))
+                    if date in date_dictionary:
+                        active_cpos = date_dictionary[date]
+                        for j in np.arange(0, len(active_cpos)):
+                            cpo_i = active_cpos[j]
+                            cpo = cpo_archives[archive_idx - 1][cpo_i]
+                            cpo_dates = cpo.dates_observed
+                            cpo_index_bool = np.asarray([k <= date for k in
+                                                         cpo_dates])
+                            cpo_bools_to_date = np.asarray(
+                                cpo.track_plume_bool)[
+                                cpo_index_bool]
+                            cpo_bools_to_date = np.asarray(
+                                [k.toarray() for k in
+                                 cpo_bools_to_date])
+                            # Find the union of all CPO bools to date
+                            cpo_sweep = np.sum(cpo_bools_to_date, axis=0)
+                            cpo_sweep = cpo_sweep > 0
+                            cpo_sweeps += cpo_sweep
+
+                        emission_bool_regridded = pinkdust.regrid_data(lons,
+                                                                       lats,
+                                                                       cloud_lons,
+                                                                       cloud_lats,
+                                                                       emission_bool)
+
+                        if np.any(emission_bool_regridded & (cpo_sweeps==1)):
+                            # An overlap between the emitted plume and a CPO sweep
+                            plume.archive_LLJ_prob = deepcopy(plume.LLJ_prob)
+                            llj_prob = 0
+                            break
+
+                """
+
+                lat_diff = np.abs(linlats - emission_lat)
+                lon_diff = np.abs(linlons - emission_lon)
+                lat_bool = lat_diff == lat_diff.min()
+                lon_bool = lon_diff == lon_diff.min()
+                union_bool = lat_bool & lon_bool
+
+                data_array[union_bool] += 1
+                prob_array[union_bool] += llj_prob
+
+            archive_idx += 1
+
+        # Find the nearest latlon for each dictionary key, and extract the index
+        # for it
+
+        #data_array[data_array == 0] = np.nan
+        prob_array = prob_array/data_array
+
+        np.save('llj_prob_array_v4_std', prob_array)
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 4.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        #m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlGnBu, 10)
+        m.imshow(prob_array, extent=extent, origin='lower', interpolation='none',
+                 cmap=discrete_cmap, vmin=0, vmax=1)
+
+        ticks = np.arange(0, 1.1, 0.1)
+        cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06,
+                     ticks=ticks)
+        cbar.ax.set_xlabel('Mean LLJ probability StDev')
+        plt.tight_layout()
+        plt.savefig('LLJ_prob_map_v5_std.png', bbox_inches='tight')
 
         plt.close()
 
@@ -1493,7 +2836,7 @@ def plot_bool_multiyear_llj_prob_map(min_lat=None,
         data_array[data_array == 0] = np.nan
         prob_array = prob_array/data_array
 
-        np.save('llj_prob_array_v3', prob_array)
+        np.save('llj_prob_array_v7', prob_array)
 
         extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
         m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
@@ -1520,7 +2863,7 @@ def plot_bool_multiyear_llj_prob_map(min_lat=None,
                      ticks=ticks)
         cbar.ax.set_xlabel('Mean LLJ probability')
         plt.tight_layout()
-        plt.savefig('LLJ_prob_map_v3.png', bbox_inches='tight')
+        plt.savefig('LLJ_prob_map_v7_2004_2017.png', bbox_inches='tight')
 
         plt.close()
 
@@ -1889,9 +3232,9 @@ def plot_multiyear_emission_count_map(plume_archives,
 
         np.save('multiyear_dust_frequency_array', data_array)
 
-def plot_multiyear_emission_count_map_2(plume_archives,
-                            lats, lons, title='plume_count_map_multiyear.png',
-                                      res=200,
+def plot_multiyear_emission_count_map_2(
+        title='plume_count_map_2004_2017_noflicker15.png',
+                                      res=100,
                             min_lat=None, min_lon=None,
                              max_lat=None, max_lon=None, pre_calculated=False):
     """
@@ -1908,6 +3251,15 @@ def plot_multiyear_emission_count_map_2(plume_archives,
     """
 
     if pre_calculated:
+
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
+
         plt.close()
         fig, ax = plt.subplots()
         extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
@@ -1921,24 +3273,28 @@ def plot_multiyear_emission_count_map_2(plume_archives,
         # labels = [left,right,top,bottom]
         m.drawparallels(parallels, labels=[False, True, True, False],
                         linewidth=0.5)
-        meridians = np.arange(-20., 17., 2.)
+        meridians = np.arange(-20., 17., 4.)
         m.drawmeridians(meridians, labels=[True, False, False, True],
                         linewidth=0.5)
 
         lats = np.linspace(np.min(lats), np.max(lats), res)
         lons = np.linspace(np.min(lons), np.max(lons), res)
         lons, lats = np.meshgrid(lons, lats)
-        data_array = np.load('prob_array_total.npy')
+        data_array = np.load('multiyear_dust_frequency_array_noflicker15.npy')
+        centroids_lon = np.load('centroids_lon.npy')
+        centroids_lat = np.load('centroids_lat.npy')
 
         # m.contourf(lons, lats, data_array)
-        discrete_cmap = utilities.cmap_discretize(cm.YlGnBu, 7)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
         #bounds = np.arange(0.3, 1.1, 0.1)
         #norm = colors.BoundaryNorm(bounds, discrete_cmap)
         m.imshow(data_array, extent=extent, origin='lower',
                  interpolation='none',
-                 cmap=discrete_cmap, vmin=0.3, vmax=1)
+                 cmap=discrete_cmap, vmin=0, vmax=60)
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        #m.scatter(centroids_lon, centroids_lat, s=2)
         vmin = 0.0
-        vmax = 40.0
+        vmax = 60.0
         step = vmax/10
         levels = np.arange(vmin, vmax, step)
         #m.contourf(lons, lats, data_array, cmap=cm.YlOrBr, levels=levels)
@@ -1946,16 +3302,56 @@ def plot_multiyear_emission_count_map_2(plume_archives,
         #m.contourf(lons, lats, data_array, cmap=cmocean.cm.solar,
         #           levels=levels)
 
-        ticks = np.arange(0.3, 1.1, 0.1)
+        #ticks = np.arange(0.3, 1.1, 0.1)
 
-        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06,
-                     ticks=ticks)
         plt.tight_layout()
         plt.savefig(title, bbox_inches='tight')
 
         plt.close()
 
     else:
+
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2012')
+        pa2013 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2013')
+        pa2014 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2014')
+        pa2015 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2015')
+        pa2016 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2016')
+        pa2017 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2017')
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012, pa2013, pa2014, pa2015,
+                          pa2016, pa2017]
+
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
+        ianlons = deepcopy(lons)
+        ianlats = deepcopy(lats)
 
         plt.close()
 
@@ -1973,8 +3369,11 @@ def plot_multiyear_emission_count_map_2(plume_archives,
 
         # Data array
         data_array = np.zeros((lons.shape))
+        centroids_lon = []
+        centroids_lat = []
 
         for plume_archive in plume_archives:
+            year_data_array = np.zeros((lons.shape))
             print 'Plume archive', archive_idx
             archive_idx += 1
             archive_size = len(plume_archive)
@@ -1993,16 +3392,16 @@ def plot_multiyear_emission_count_map_2(plume_archives,
                 plume_idx += 1
                 # If the plume has merged, the plume source is found in the
                 # pre-merge track
-                if plume_archive[i].merged == True:
-                    emission_lat = np.round(plume_archive[
-                        i].pre_merge_track_centroid_lat[0], 1)
-                    emission_lon = np.round(plume_archive[
-                        i].pre_merge_track_centroid_lon[0], 1)
-                else:
-                    emission_lat = np.round(plume_archive[
-                        i].track_centroid_lat[0], 1)
-                    emission_lon = np.round(plume_archive[
-                        i].track_centroid_lon[0], 1)
+                #if plume_archive[i].merged == True:
+                #    emission_lat = np.round(plume_archive[
+                #        i].pre_merge_track_centroid_lat[0], 1)
+                #    emission_lon = np.round(plume_archive[
+                #        i].pre_merge_track_centroid_lon[0], 1)
+                #else:
+                emission_lat = np.round(plume_archive[
+                    i].track_centroid_lat[0], 1)
+                emission_lon = np.round(plume_archive[
+                    i].track_centroid_lon[0], 1)
 
                 lat_diff = np.abs(lats-emission_lat)
                 lon_diff = np.abs(lons-emission_lon)
@@ -2010,6 +3409,9 @@ def plot_multiyear_emission_count_map_2(plume_archives,
                 lon_bool = lon_diff == lon_diff.min()
                 union_bool = lat_bool & lon_bool
                 data_array[union_bool] += 1
+                year_data_array[union_bool] += 1
+                centroids_lon.append(emission_lon)
+                centroids_lat.append(emission_lat)
 
                 """
 
@@ -2021,6 +3423,40 @@ def plot_multiyear_emission_count_map_2(plume_archives,
                     latlon_dictionary[(emission_lat, emission_lon)] += 1
 
                 """
+            year_data_array[year_data_array == 0] = np.nan
+            np.save('dust_frequency_array_'+str(archive_idx-1),
+                    year_data_array)
+            """
+            extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+            m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                        llcrnrlat=extent[2], urcrnrlat=extent[3],
+                        resolution='i')
+
+            m.drawcoastlines(linewidth=0.5)
+            m.drawcountries(linewidth=0.5)
+            parallels = np.arange(10., 40, 2.)
+            # labels = [left,right,top,bottom]
+            m.drawparallels(parallels, labels=[False, True, True, False],
+                            linewidth=0.5)
+            meridians = np.arange(-20., 17., 4.)
+            m.drawmeridians(meridians, labels=[True, False, False, True],
+                            linewidth=0.5)
+
+            # m.contourf(lons, lats, data_array)
+            discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+            m.imshow(year_data_array, extent=extent, origin='lower',
+                     interpolation='none',
+                     cmap=discrete_cmap, vmin=0, vmax=10)
+            m.scatter(centroids_lon, centroids_lat, marker='+')
+
+            plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+            plt.tight_layout()
+            plt.savefig('dust_emission_count_'+str(archive_idx-1)+'.png',
+                        bbox_inches='tight')
+
+            plt.close()
+
+            """
 
         # Find the nearest latlon for each dictionary key, and extract the index
         # for it
@@ -2046,6 +3482,9 @@ def plot_multiyear_emission_count_map_2(plume_archives,
 
         data_array[data_array == 0] = np.nan
 
+        np.save('centroids_lon', centroids_lon)
+        np.save('centroids_lat', centroids_lat)
+
         extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
         m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
                     llcrnrlat=extent[2], urcrnrlat=extent[3],
@@ -2057,7 +3496,7 @@ def plot_multiyear_emission_count_map_2(plume_archives,
         # labels = [left,right,top,bottom]
         m.drawparallels(parallels, labels=[False, True, True, False],
                         linewidth=0.5)
-        meridians = np.arange(-20., 17., 2.)
+        meridians = np.arange(-20., 17., 4.)
         m.drawmeridians(meridians, labels=[True, False, False, True],
                         linewidth=0.5)
 
@@ -2065,6 +3504,7 @@ def plot_multiyear_emission_count_map_2(plume_archives,
         discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
         m.imshow(data_array, extent=extent, origin='lower', interpolation='none',
                  cmap=discrete_cmap, vmin=0, vmax=40)
+        #m.scatter(centroids_lon, centroids_lat, marker='+')
 
         plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
         plt.tight_layout()
@@ -2072,8 +3512,8 @@ def plot_multiyear_emission_count_map_2(plume_archives,
 
         plt.close()
 
-        np.save('multiyear_dust_frequency_array', data_array)
-        np.save('sourced_array', sourced_array)
+        np.save('multiyear_dust_frequency_array_noflicker15', data_array)
+        np.save('sourced_array_noflicker15', sourced_array)
 
 def plot_multiyear_emission_area_map(plume_archives,
                             lats, lons, title='plume_area_map_multiyear.png',
@@ -2413,10 +3853,9 @@ def plot_multiyear_emission_time_map(title='plume_time_map_multiyear.png',
 
         plt.close()
 
-def plot_multiyear_emission_count_map_3(plume_archives,
-                                        lats, lons,
-                                        title='plume_count_map_multiyear.png',
-                                        res=200,
+def plot_multiyear_emission_count_map_3(
+        title='plume_count_map_multiyear_bool_v3_2004_2017_flicker15.png',
+                                        res=100,
                                         min_lat=None, min_lon=None,
                                         max_lat=None, max_lon=None,
                                         pre_calculated=False):
@@ -2434,6 +3873,13 @@ def plot_multiyear_emission_count_map_3(plume_archives,
     """
 
     if pre_calculated:
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
         plt.close()
         fig, ax = plt.subplots()
         extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
@@ -2447,21 +3893,23 @@ def plot_multiyear_emission_count_map_3(plume_archives,
         # labels = [left,right,top,bottom]
         m.drawparallels(parallels, labels=[False, True, True, False],
                         linewidth=0.5)
-        meridians = np.arange(-20., 17., 2.)
+        meridians = np.arange(-20., 17., 4.)
         m.drawmeridians(meridians, labels=[True, False, False, True],
                         linewidth=0.5)
 
         #lats = np.linspace(np.min(lats), np.max(lats), res)
         #lons = np.linspace(np.min(lons), np.max(lons), res)
         #lons, lats = np.meshgrid(lons, lats)
-        data_array = np.load('multiyear_dust_frequency_array_v3.npy')
+        data_array = np.load(
+            'multiyear_dust_frequency_array_bool_noflickercheck_2004_2012'
+            '.npy')
         #data_array[data_array < 5] = np.nan
 
         # m.contourf(lons, lats, data_array)
         discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
         m.imshow(data_array, extent=extent, origin='lower',
                  interpolation='none',
-                 cmap=discrete_cmap, vmin=0, vmax=40)
+                 cmap=discrete_cmap, vmin=0, vmax=100)
         vmin = 0.0
         vmax = 40.0
         step = vmax / 10
@@ -2470,14 +3918,76 @@ def plot_multiyear_emission_count_map_3(plume_archives,
         # m.contourf(lons, lats, data_array, cmap=cmocean.cm.solar,
         #           levels=levels)
 
-        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06,
-                     extend='both')
+        cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
         plt.tight_layout()
         plt.savefig(title, bbox_inches='tight')
 
         plt.close()
 
     else:
+        """
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2012')
+        pa2013 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2013')
+        pa2014 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2014')
+        pa2015 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2015')
+        pa2016 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2016')
+        pa2017 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v4_prob_v4_2017')
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012, pa2013, pa2014, pa2015,
+                          pa2016, pa2017]
+        """
+
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2012')
+
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012]
+
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
 
         plt.close()
 
@@ -2518,8 +4028,10 @@ def plot_multiyear_emission_count_map_3(plume_archives,
                     used_percentages.append(int((float(plume_idx) / float(
                         archive_size)) * 100))
                 plume_idx += 1
+                plume = plume_archive[i]
                 # If the plume has merged, the plume source is found in the
                 # pre-merge track
+                """
                 if plume_archive[i].merged == True:
                     emission_lat = np.round(plume_archive[
                                                 i].pre_merge_track_centroid_lat[
@@ -2527,65 +4039,66 @@ def plot_multiyear_emission_count_map_3(plume_archives,
                     emission_lon = np.round(plume_archive[
                                                 i].pre_merge_track_centroid_lon[
                                                 0], 1)
-                else:
+                """
 
-                    emission_bool = plume_archive[i].track_plume_bool[0]
-                    emission_bool = emission_bool.toarray()
+                emission_bool = plume.track_plume_bool[0]
+                emission_bool = emission_bool.toarray()
 
-                    em_lats = np.round(lats[emission_bool], 0)
-                    em_lons = np.round(lons[emission_bool], 0)
+                em_lats = np.round(lats[emission_bool], 0)
+                em_lons = np.round(lons[emission_bool], 0)
 
-                    emission_lat = np.round(plume_archive[
-                                                i].track_centroid_lat[0], 0)
-                    emission_lon = np.round(plume_archive[
-                                                i].track_centroid_lon[0], 0)
+                emission_lat = np.round(plume.track_centroid_lat[0], 0)
+                emission_lon = np.round(plume.track_centroid_lon[0], 0)
 
-                    if (emission_lat == 26 or emission_lat == 27) and (
-                            emission_lon == 1 or emission_lon == 2):
+                """
 
-                        print 'Found a Tidihelt with centroid lat', \
-                            emission_lat
-                        print 'and centroid lon', \
-                            emission_lon
-                        # union_bool = lat_bool & lon_bool
-                        print 'Found these emission lats', np.nanmean(lats[emission_bool])
-                        print 'Count', len(lats[emission_bool])
-                        print 'and these emission lons', np.nanmean(lons[emission_bool])
-                        print 'Count', len(lons[emission_bool])
+                if (emission_lat == 26 or emission_lat == 27) and (
+                        emission_lon == 1 or emission_lon == 2):
 
-                        tidihelt_array[emission_bool] += 1
-                        print 'Tidihelt array at these points:'
-                        print tidihelt_array[emission_bool]
+                    print 'Found a Tidihelt with centroid lat', \
+                        emission_lat
+                    print 'and centroid lon', \
+                        emission_lon
+                    # union_bool = lat_bool & lon_bool
+                    print 'Found these emission lats', np.nanmean(lats[emission_bool])
+                    print 'Count', len(lats[emission_bool])
+                    print 'and these emission lons', np.nanmean(lons[emission_bool])
+                    print 'Count', len(lons[emission_bool])
 
-                        print 'Plotting Tidihelt emission'
-                        plt.close()
-                        plt.contourf(lons, lats, emission_bool)
-                        plt.savefig('Tidihelt_emission'+i+'.png')
-                        plt.close()
+                    tidihelt_array[emission_bool] += 1
+                    print 'Tidihelt array at these points:'
+                    print tidihelt_array[emission_bool]
 
-                        emission_time = plume_archive[i].emission_time
-                        emission_year = emission_time.year
+                    print 'Plotting Tidihelt emission'
+                    plt.close()
+                    plt.contourf(lons, lats, emission_bool)
+                    plt.savefig('Tidihelt_emission'+i+'.png')
+                    plt.close()
 
-                        if str(emission_year) in tidihelt_dict:
-                            tidihelt_dict[str(emission_year)] += 1
-                        else:
-                            tidihelt_dict[str(emission_year)] = 1
-                        if str(emission_year) in tidihelt_llj_dict:
-                            a = tidihelt_llj_dict[str(emission_year)]
-                            p = plume_archive[i].LLJ_prob
-                            a.append(p)
-                            tidihelt_llj_dict[str(emission_year)] = a
+                    emission_time = plume_archive[i].emission_time
+                    emission_year = emission_time.year
 
-                        else:
-                            tidihelt_llj_dict[str(emission_year)] = \
-                                [plume_archive[i].LLJ_prob]
+                    if str(emission_year) in tidihelt_dict:
+                        tidihelt_dict[str(emission_year)] += 1
+                    else:
+                        tidihelt_dict[str(emission_year)] = 1
+                    if str(emission_year) in tidihelt_llj_dict:
+                        a = tidihelt_llj_dict[str(emission_year)]
+                        p = plume_archive[i].LLJ_prob
+                        a.append(p)
+                        tidihelt_llj_dict[str(emission_year)] = a
 
-                    data_array[emission_bool] += 1
+                    else:
+                        tidihelt_llj_dict[str(emission_year)] = \
+                            [plume_archive[i].LLJ_prob]
+
+                """
+
+                data_array[emission_bool] += 1
 
         print np.unique(data_array)
 
         data_array[data_array == 0] = np.nan
-        data_array[data_array < 5] = np.nan
 
         extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
         m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
@@ -2594,27 +4107,30 @@ def plot_multiyear_emission_count_map_3(plume_archives,
 
         m.drawcoastlines(linewidth=0.5)
         m.drawcountries(linewidth=0.5)
-        parallels = np.arange(15., 37, 2.)
+        parallels = np.arange(10., 40, 2.)
         # labels = [left,right,top,bottom]
-        m.drawparallels(parallels, labels=[False, True, True, False])
-        meridians = np.arange(-17., 15., 2.)
-        m.drawmeridians(meridians, labels=[True, False, False, True])
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 4.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
 
         # m.contourf(lons, lats, data_array)
         discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
         m.imshow(data_array, extent=extent, origin='lower',
                  interpolation='none',
-                 cmap=discrete_cmap, vmin=0, vmax=40)
+                 cmap=discrete_cmap, vmin=0, vmax=50)
 
-        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.04)
+        cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
         plt.tight_layout()
         plt.savefig(title, bbox_inches='tight')
 
         plt.close()
 
-        np.save('multiyear_dust_frequency_array', data_array)
+        np.save('multiyear_dust_frequency_array_bool_noflickercheck_2004_2012',
+                data_array)
 
-
+        """
         print tidihelt_dict
 
         yearly_tidihelt = np.asarray([tidihelt_dict[j] for j in tidihelt_dict])
@@ -2663,6 +4179,210 @@ def plot_multiyear_emission_count_map_3(plume_archives,
 
         tidihelt_dict.close()
         tidihelt_llj_dict.close()
+
+        """
+
+def plot_multiyear_emission_bool_area_map(
+        title='plume_count_map_multiyear_bool_area_2004_2017.png',
+                                        res=100,
+                                        min_lat=None, min_lon=None,
+                                        max_lat=None, max_lon=None,
+                                        pre_calculated=False):
+    """
+    Plots a map of emission count, akin to Ashpole and Washington (2012)
+    key figure (to be updated to frequency)
+    :param plume_archive:
+    :param lats:
+    :param lons:
+    :param min_lat:
+    :param min_lon:
+    :param max_lat:
+    :param max_lon:
+    :return:
+    """
+
+    if pre_calculated:
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
+        plt.close()
+        fig, ax = plt.subplots()
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 4.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        #lats = np.linspace(np.min(lats), np.max(lats), res)
+        #lons = np.linspace(np.min(lons), np.max(lons), res)
+        #lons, lats = np.meshgrid(lons, lats)
+        data_array = np.load('multiyear_dust_area_array_bool_noflicker.npy')
+        #data_array[data_array < 5] = np.nan
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(data_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap, vmin=0, vmax=100000000000)
+        vmin = 0.0
+        vmax = 40.0
+        step = vmax / 10
+        levels = np.arange(vmin, vmax, step)
+        # m.contourf(lons, lats, data_array, cmap=cm.YlOrBr, levels=levels)
+        # m.contourf(lons, lats, data_array, cmap=cmocean.cm.solar,
+        #           levels=levels)
+
+        cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+    else:
+
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v3_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v3_2012')
+        pa2013 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2013')
+        pa2014 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2014')
+        pa2015 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2015')
+        pa2016 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2016')
+        pa2017 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2017')
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012, pa2013, pa2014, pa2015,
+                          pa2016, pa2017]
+
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
+
+        plt.close()
+
+        fig, ax = plt.subplots()
+
+        latlon_dictionary = {}
+
+        #lats = np.linspace(np.min(lats), np.max(lats), res)
+        #lons = np.linspace(np.min(lons), np.max(lons), res)
+        #lons, lats = np.meshgrid(lons, lats)
+
+        archive_idx = 1
+
+        # Data array
+        data_array = np.zeros((lons.shape))
+        tidihelt_array = np.zeros((lons.shape))
+
+        # Tidihelt year dictionary
+        tidihelt_dict = shelve.open('tidihelt_dict')
+        tidihelt_llj_dict = shelve.open('tidihelt_llj_dict')
+        tidihelt_dict.clear()
+        tidihelt_llj_dict.clear()
+
+        for plume_archive in plume_archives:
+            print 'Plume archive', archive_idx
+            archive_idx += 1
+            archive_size = len(plume_archive)
+            plume_idx = 1
+            used_percentages = []
+            for i in plume_archive:
+                if int((float(plume_idx) / float(
+                        archive_size)) * 100) % 10 == 0 and int((float(
+                    plume_idx) / float(archive_size)) * 100) not in \
+                        used_percentages:
+                    print str(int((float(plume_idx) / float(
+                        archive_size)) * 100)) + "%"
+                    # This percentage has been printed already
+                    used_percentages.append(int((float(plume_idx) / float(
+                        archive_size)) * 100))
+                plume_idx += 1
+                plume = plume_archive[i]
+                # If the plume has merged, the plume source is found in the
+                # pre-merge track
+                emission_bool = plume.track_plume_bool[0]
+                emission_bool = emission_bool.toarray()
+
+                emission_area = plume.track_area[0]
+
+                em_lats = np.round(lats[emission_bool], 0)
+                em_lons = np.round(lons[emission_bool], 0)
+
+                emission_lat = np.round(plume.track_centroid_lat[0], 0)
+                emission_lon = np.round(plume.track_centroid_lon[0], 0)
+
+                data_array[emission_bool] += emission_area
+
+        data_array[data_array == 0] = np.nan
+
+        counts_array = np.load(
+            'multiyear_dust_frequency_array_bool_noflicker.npy')
+
+        data_array = data_array/counts_array
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 4.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(data_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap, vmin=0, vmax=10000000000)
+
+        cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        plt.tight_layout()
+        plt.savefig(title, bbox_inches='tight')
+
+        plt.close()
+
+        np.save('multiyear_dust_area_array_bool_noflicker', data_array)
 
 def plot_plume_tracks(plume_archive, lats, lons, min_lat=None,
                             min_lon=None,
@@ -2729,7 +4449,7 @@ def plot_traces(traces, retain=1000):
 # Assign it to that index in the empty data array of nans, and Bob's
 # your uncle
 
-def plot_midas_comparison(midas_filename, plume_archives, pre_calculated=True):
+def plot_midas_comparison(pre_calculated=False):
     """
     Plots a multiyear comparison of MIDAS 0900UTC wind speed data and Tidihelt
     depression dust activation, including distributions of wind speed for
@@ -2741,8 +4461,30 @@ def plot_midas_comparison(midas_filename, plume_archives, pre_calculated=True):
     :return:
     """
 
-    # Read in the MIDAS data from file, along with an array of times
+    midas_filename = '17667.60630.SYNOP.midas.gl.nc'
+
     insalah = Dataset(midas_filename)
+
+    pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2004')
+    pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2005')
+    pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2006')
+    pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2007')
+    pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2008')
+    pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2009')
+    pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2010')
+    pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2011')
+    pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2012')
+    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                      pa2010, pa2011, pa2012]
 
     emission_times = []
 
@@ -2764,7 +4506,7 @@ def plot_midas_comparison(midas_filename, plume_archives, pre_calculated=True):
 
         bool_09 = np.asarray(
             [(j.hour == 9) and (j.year >= 2004 and j.year <=
-                                               2010
+                                               2012
                               and j.month in [6, 7, 8]) for j in
              insalah_times])
 
@@ -2904,8 +4646,72 @@ def plot_midas_comparison(midas_filename, plume_archives, pre_calculated=True):
         ax.set_ylabel('Frequency')
         plt.savefig('midas_comparison_distributions.png')
 
-def plot_tidihelt_spatial_midas(midas_filename, plume_archives, res=10,
-                                pre_calculated=False):
+def plot_insalah_yearly_timeseries():
+
+    midas_filename = '17667.60630.SYNOP.midas.gl.nc'
+    insalah = Dataset(midas_filename)
+    insalah_times = num2date(insalah.variables['TIME'][:],
+                             insalah.variables['TIME'].units)
+    tidihelt_emission_dates = np.load('tidihelt_emission_dates.npy')
+
+    pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2004')
+    pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2005')
+    pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2006')
+    pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2007')
+    pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2008')
+    pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2009')
+    pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2010')
+    pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2011')
+    pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_v3_prob_v3_2012')
+    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                      pa2010, pa2011, pa2012]
+
+    years = np.arange(2004, 2013)
+
+    for i in np.arange(0, len(years)):
+        year_bool = np.asarray([j.year == years[i] and j.month in [6, 7,
+                                                                   8] and
+                                j.hour == 9
+                                                                    for j in
+                                insalah_times])
+        year_emission_bool = np.asarray([j.year == years[i] and j.month in [6, 7,
+                                                                   8] and
+                                j.hour == 9
+                                                                    for j in
+                                tidihelt_emission_dates])
+        year_emissions = tidihelt_emission_dates[year_emission_bool]
+        year_times = insalah_times[year_bool]
+        year_data = insalah.variables['WIND_SPEED'][year_bool]
+
+        fig, ax = plt.subplots(figsize=(20, 5))
+
+        plt.plot(year_times, year_data)
+
+        ax.xaxis.set_major_locator(mdates.DayLocator(
+            interval=2))  # to get a tick every day
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%Y'))
+
+        plt.xticks(rotation=45, ha='right')
+
+        for emission in year_emissions:
+            plt.axvline(x=emission, color='r')
+
+        plt.tight_layout()
+
+        plt.savefig('Insalah_wind_speed_'+str(years[i])+'.png')
+
+        plt.close()
+
+def plot_tidihelt_spatial_midas(res=20, pre_calculated=False):
     """
     For the region of the Tidihelt Depression, plots a high resolution dust
     source map with pixels coloured according to the wind speed reading at
@@ -2920,6 +4726,7 @@ def plot_tidihelt_spatial_midas(midas_filename, plume_archives, res=10,
     tidihelt_emission_dates = np.load('tidihelt_emission_dates.npy')
     for i in np.arange(0, len(tidihelt_emission_dates)):
         emission_date = tidihelt_emission_dates[i]
+    midas_filename = '17667.60630.SYNOP.midas.gl.nc'
     insalah = Dataset(midas_filename)
 
     # Get lats and lons for the extremely generous Tidihelt region and get a
@@ -2930,6 +4737,7 @@ def plot_tidihelt_spatial_midas(midas_filename, plume_archives, res=10,
     lons, lats = np.meshgrid(linlons, linlats)
     data_array = np.zeros((lats.shape))
     counts_array = np.zeros((lats.shape))
+    areas_array = np.zeros((lats.shape))
 
     insalah_wspd = insalah.variables['WIND_SPEED'][:]
     insalah_times = num2date(insalah.variables['TIME'][:],
@@ -2947,7 +4755,7 @@ def plot_tidihelt_spatial_midas(midas_filename, plume_archives, res=10,
 
     bool_period = np.asarray(
         [(j.year >= 2004 and j.year <=
-                            2010
+                            2012
                             and j.month in [6, 7, 8]) for j in
          insalah_times])
     insalah_wspd = insalah_wspd[bool_period]
@@ -2991,12 +4799,35 @@ def plot_tidihelt_spatial_midas(midas_filename, plume_archives, res=10,
 
         m.scatter(insalah.variables['LON'][:], insalah.variables['LAT'][:])
 
+        m.contour(lons, lats, orog_regridded)
+
         plt.tight_layout()
         plt.savefig('Tidihelt_midas_counts.png', bbox_inches='tight')
 
         plt.close()
 
     else:
+
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_v3_prob_v3_2012')
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012]
 
         for plume_archive in plume_archives:
             print 'Plume archive', archive_count
@@ -3037,6 +4868,8 @@ def plot_tidihelt_spatial_midas(midas_filename, plume_archives, res=10,
                         time_differences==np.min(
                         time_differences)]
 
+                    emission_area = plume.track_area[0]
+
                     emission_time = nearest_time[0]
                     time_bool = insalah_times == emission_time
                     if np.all(time_bool == False):
@@ -3053,10 +4886,13 @@ def plot_tidihelt_spatial_midas(midas_filename, plume_archives, res=10,
                     union_bool = latbool & lonbool
                     data_array[union_bool] += insalah_wspd_matched
                     counts_array[union_bool] += 1
+                    areas_array[union_bool] += emission_area
 
         remove_bool = np.asarray([j in emission_times for j in insalah_times])
         no_emission_wspds = np.asarray(no_emission_wspds)
         no_emission_wspds[remove_bool] = -999
+
+        areas_array = areas_array/counts_array
 
         no_emission_wspds = no_emission_wspds[no_emission_wspds!=-999]
 
@@ -3065,6 +4901,7 @@ def plot_tidihelt_spatial_midas(midas_filename, plume_archives, res=10,
 
         np.save('tidihelt_totals', data_array)
         np.save('tidihelt_counts', counts_array)
+        np.save('tidihelt_areas', areas_array)
 
         data_array_mean = data_array/counts_array
 
@@ -3095,6 +4932,33 @@ def plot_tidihelt_spatial_midas(midas_filename, plume_archives, res=10,
         m.scatter(insalah.variables['LON'][:], insalah.variables['LAT'][:])
         plt.tight_layout()
         plt.savefig('Tidihelt_midas_wspd_time_matched_northeasterly.png',
+                    bbox_inches='tight')
+
+        plt.close()
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(25, 28, 0.5)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-1, 3, 0.5)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(areas_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        plt.tight_layout()
+        plt.savefig('Tidihelt_areas.png',
                     bbox_inches='tight')
 
         plt.close()
@@ -3156,7 +5020,7 @@ def plot_midas_correlation_maps(res=100):
     # Constrain the dates to the period for which we have plumetracker
     bool_period = np.asarray(
         [(j.year >= 2004 and j.year <=
-          2010
+          2017
           and j.month in [6, 7, 8]) for j in
          insalah_times])
 
@@ -3180,26 +5044,41 @@ def plot_midas_correlation_maps(res=100):
 
     # Get plume archives
     pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_2004')
+                         'plume_archive_flicker_v3_prob_v4_2004')
     pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_2005')
+                         'plume_archive_flicker_v3_prob_v4_2005')
     pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_2006')
+                         'plume_archive_flicker_v3_prob_v4_2006')
     pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_2007')
+                         'plume_archive_flicker_v3_prob_v4_2007')
     pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_2008')
+                         'plume_archive_flicker_v3_prob_v4_2008')
     pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_2009')
+                         'plume_archive_flicker_v3_prob_v4_2009')
     pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_2010')
-    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009, pa2010]
+                         'plume_archive_flicker_v3_prob_v4_2010')
+    pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2011')
+    pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2012')
+    pa2013 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v4_2013')
+    pa2014 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v4_2014')
+    pa2015 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v4_2015')
+    pa2016 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v4_2016')
+    pa2017 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v4_2017')
+    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                      pa2010, pa2011, pa2012, pa2013, pa2014, pa2015,
+                      pa2016, pa2017]
 
     # Convert an array of datetimes corresponding to the plume archives into
     #  an index array
-
-    archive_count = 1
     """
+    archive_count = 1
 
     for plume_archive in plume_archives:
         print 'Plume archive', archive_count
@@ -3428,7 +5307,8 @@ def plot_midas_correlation_maps(res=100):
         m.scatter(midas_stations[i].variables['LON'][:],
                   midas_stations[i].variables['LAT'][:])
         plt.tight_layout()
-        plt.savefig('MIDAS_dust_emission_correlation_'+labels[i]+'_full.png',
+        plt.savefig('MIDAS_dust_emission_correlation_'+labels[
+            i]+'_2004_2017.png',
                     bbox_inches='tight')
 
         plt.close()
@@ -3446,12 +5326,13 @@ def plot_midas_correlation_maps(res=100):
                       'activation '
                       'event',
                 alpha=0.5)
-        ax.legend()
-        ax2.legend(loc=0)
+        ax.legend(loc=2)
+        ax2.legend(loc=1)
+        #plt.legend()
         ax.set_xlabel('Wind speed (m/s)')
         ax.set_ylabel('Frequency (no dust)')
         ax2.set_ylabel('Frequency (dust)')
-        plt.savefig('wspd_distributions_'+labels[i]+'.png')
+        plt.savefig('wspd_distributions_2004_2017_'+labels[i]+'.png')
 
         plt.close()
 
@@ -3473,7 +5354,7 @@ def plot_midas_correlation_maps(res=100):
         ax.set_xlabel('Wind direction (deg)')
         ax.set_ylabel('Frequency (no dust)')
         ax2.set_ylabel('Frequency (dust)')
-        plt.savefig('wdir_distributions_' + labels[i] + '.png')
+        plt.savefig('wdir_distributions_2004_2017_' + labels[i] + '.png')
 
         plt.close()
 
@@ -3517,7 +5398,7 @@ def plot_midas_correlation_maps(res=100):
         ax.set_xlabel('Temp (degC)')
         ax.set_ylabel('Frequency (no dust)')
         ax2.set_ylabel('Frequency (dust)')
-        plt.savefig('temp_distributions_' + labels[i] + '.png')
+        plt.savefig('temp_distributions_2004_2017' + labels[i] + '.png')
 
         plt.close()
 
@@ -3705,20 +5586,25 @@ def plot_llj_predictors(title_1='mean_convection_distance.png',
 
     # Get plume archives
     pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_v2_2004')
+                         'plume_archive_flicker_v3_prob_v3_2004')
     pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_v2_2005')
+                         'plume_archive_flicker_v3_prob_v3_2005')
     pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_v2_2006')
+                         'plume_archive_flicker_v3_prob_v3_2006')
     pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_v2_2007')
+                         'plume_archive_flicker_v3_prob_v3_2007')
     pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_v2_2008')
+                         'plume_archive_flicker_v3_prob_v3_2008')
     pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_v2_2009')
+                         'plume_archive_flicker_v3_prob_v3_2009')
     pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
-                         'plume_archive_flicker_v3_prob_v2_2010')
-    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009, pa2010]
+                         'plume_archive_flicker_v3_prob_v3_2010')
+    pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2010')
+    pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                         'plume_archive_flicker_v3_prob_v3_2010')
+    plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                      pa2010, pa2011, pa2012]
 
     if pre_calculated:
         plt.close()
@@ -4542,6 +6428,1506 @@ def plot_llj_predictors(title_1='mean_convection_distance.png',
         plt.savefig('august_' + title_3, bbox_inches='tight')
 
         plt.close()
+
+def plot_multiyear_cpo_sweeps(pre_calculated=False):
+    """
+    Plots a map of the sum of CPO sweeps across all years of data availability
+    :return:
+    """
+
+    if pre_calculated:
+        # Get lats and lons
+        cloud_test = Dataset(
+            '/soge-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/cloudmask'
+            '/nc/'
+            +
+            'JUNE2010_CLOUDS/eumetsat.cloud.'
+            + '201006031500.nc')
+        cloud_lons = cloud_test.variables['lon'][:]
+        cloud_lats = cloud_test.variables['lat'][:]
+        lons, lats = np.meshgrid(cloud_lons, cloud_lats)
+
+        # Get lats and lons
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
+
+        plt.close()
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 4.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        min = 0
+        max = 50
+
+        levels = MaxNLocator(nbins=15).tick_values(min, max)
+
+        # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+        cmap = cm.get_cmap('Blues')
+        norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+        data_array = np.load('cpo_array_v2.npy')
+
+        data_array = np.ma.masked_where(np.isnan(data_array),
+                                        data_array)
+
+        m.pcolormesh(lons, lats, data_array,
+                     cmap=cmap, norm=norm, vmin=min, vmax=max)
+
+        cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        cbar.ax.set_xlabel('Counts of CPO sweep occurrence')
+        plt.tight_layout()
+
+        # Read in cloud frequency
+        cloud_frequency = np.load('cloudcover_array2010.npy')
+
+        # Read in cloud lons, lats
+        # Get cloud lats and lons
+        cloud_test = Dataset(
+            '/soge-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/cloudmask'
+            '/nc/'
+            +
+            'JUNE2010_CLOUDS/eumetsat.cloud.'
+            + '201006031500.nc')
+        cloud_lons = cloud_test.variables['lon'][:]
+        cloud_lats = cloud_test.variables['lat'][:]
+        orig_lons, orig_lats = np.meshgrid(cloud_lons, cloud_lats)
+
+        #cloud_frequency[cloud_frequency < 24000] = np.nan
+        #cloud_frequency[cloud_frequency > 25000] = np.nan
+
+        clouds_frequency_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
+                                                          lons,
+                                                          lats,
+                                                          cloud_frequency,
+                                                          mesh=True)
+
+        clouds_frequency_regridded[lats > 22] = np.nan
+        clouds_frequency_regridded[lons < -15.5] = np.nan
+
+        m.contour(lons, lats, clouds_frequency_regridded, levels=[24000],
+                  linestyles='dashed', colors='firebrick')
+
+        plt.savefig('CPO_multiyear_sweep_frequency_2004_2017_clouds.png',
+                    bbox_inches='tight')
+
+        plt.close()
+
+    else:
+
+        # Get lats and lons
+        cloud_test = Dataset(
+            '/soge-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/cloudmask'
+            '/nc/'
+            +
+            'JUNE2010_CLOUDS/eumetsat.cloud.'
+            + '201006031500.nc')
+        cloud_lons = cloud_test.variables['lon'][:]
+        cloud_lats = cloud_test.variables['lat'][:]
+        lons, lats = np.meshgrid(cloud_lons, cloud_lats)
+
+        # Get lats and lons
+        sdf_test = Dataset(
+            '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+            '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+            '201006031500.nc')
+
+        lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                                 sdf_test.variables['latitude'][:])
+
+        # Get cpo archives
+        ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2004')
+        ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2005')
+        ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2006')
+        ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2007')
+        ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2008')
+        ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2009')
+        ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2010')
+        ca2011 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2011')
+        ca2012 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2012')
+        ca2013 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2013')
+        ca2014 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2014')
+        ca2015 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2015')
+        ca2016 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2016')
+        ca2017 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                             'cpo_archive_v4_2017')
+        cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010,
+                        ca2011, ca2012, ca2013, ca2014, ca2015, ca2016,
+                        ca2017]
+
+        archive_idx = 1
+
+        data_array = np.zeros((lons.shape))
+
+        count = 0
+
+        for cpo_archive in cpo_archives:
+            print 'CPO archive', archive_idx
+            archive_idx += 1
+            archive_size = len(cpo_archive)
+            cpo_idx = 1
+            used_percentages = []
+            for i in cpo_archive:
+                if int((float(cpo_idx) / float(
+                        archive_size)) * 100) % 10 == 0 and int((float(
+                    cpo_idx) / float(archive_size)) * 100) not in \
+                        used_percentages:
+                    print str(int((float(cpo_idx) / float(
+                        archive_size)) * 100)) + "%"
+                    # This percentage has been printed already
+                    used_percentages.append(int((float(cpo_idx) / float(
+                        archive_size)) * 100))
+                cpo_idx += 1
+
+                cpo = cpo_archive[i]
+                cpo_bools = cpo.track_plume_bool
+                cpo_lons = lons[cpo_bools[0].toarray()]
+                # Remove artifact stretching across image
+                count += 1
+
+                #cpo_sweep = np.zeros((lons.shape)) # COMMENT THIS LINE FOR CPO
+                # SWEEP V1
+                min = 0
+                max = 0
+                for j in cpo_bools:
+                    cpo_bool = j.toarray()
+                    if archive_idx == 2:
+                        if np.min(lons[cpo_bool]) < -17:
+                    #        print cpo.plume_id
+                            continue
+                    #cpo_sweep[cpo_bool] = 1 # COMMENT THIS LINE FOR CPO SWEEP V1
+                    if cpo_bool.shape == data_array.shape:
+                        data_array += cpo_bool
+                    else:
+                        print 'Misshapen CPO found'
+                        count -= 1
+                #data_array += cpo_sweep # COMMENT THIS LINE FOR CPO SWEEP V1
+            print 'Found', count, 'CPOs'
+            print np.unique(data_array)
+
+        plt.close()
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 4.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        min = 0
+        max = 50
+
+        levels = MaxNLocator(nbins=15).tick_values(min, max)
+
+        # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+        cmap = cm.get_cmap('Blues')
+        norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+        # m.pcolormesh(lons, lats, correlation_array, extent=extent,
+        #             origin='lower',
+        #         interpolation='none',
+        #         cmap=cmap, vmin=min, vmax=max+1)
+
+        np.save('cpo_array_v2', data_array)
+
+        data_array = np.ma.masked_where(np.isnan(data_array),
+                                             data_array)
+
+        m.pcolormesh(lons, lats, data_array,
+                     cmap=cmap, norm=norm, vmin=min, vmax=max)
+
+        cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        cbar.ax.set_xlabel('Counts of CPO sweep occurrence')
+        plt.tight_layout()
+
+        # Read in cloud frequency
+        cloud_frequency = np.load('cloudcover_array2010.npy')
+
+        # Read in cloud lons, lats
+        # Get cloud lats and lons
+        cloud_test = Dataset(
+            '/soge-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/cloudmask'
+            '/nc/'
+            +
+            'JUNE2010_CLOUDS/eumetsat.cloud.'
+            + '201006031500.nc')
+        cloud_lons = cloud_test.variables['lon'][:]
+        cloud_lats = cloud_test.variables['lat'][:]
+        orig_lons, orig_lats = np.meshgrid(cloud_lons, cloud_lats)
+
+        clouds_frequency_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
+                                                    lons,
+                                                    lats,
+                                                    cloud_frequency, mesh=True)
+
+        clouds_frequency_regridded[lats > 22] = np.nan
+        clouds_frequency_regridded[lons < -15.7] = np.nan
+
+        m.contour(lons, lats, clouds_frequency_regridded, levels=[24000],
+                  linestyles='dashed', colors='firebrick')
+
+        plt.savefig('CPO_multiyear_sweep_frequency_2004_2017_clouds_v2.png',
+                    bbox_inches='tight')
+
+        plt.close()
+
+        for ca in cpo_archives:
+            ca.close()
+
+def plot_multiyear_cloud_cover(pre_calculated = False):
+    """
+    Goes through every cloud mask file and plots the count of cloud coverage in each region
+    Note that daily cloudmask files are not binary -> values greater than 1
+    need to be selected, while for Ian's cloudmask files it's binary.
+    :return:
+    """
+
+    # Get cloud lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    target_lons, target_lats = np.meshgrid(cloud_lons, cloud_lats)
+
+    target_area = utils.load_area(
+        '/soge-home/projects/seviri_dust/areas.def',
+        'NorthAfrica')
+    root2_lons, root2_lats = target_area.get_lonlats()
+
+    if pre_calculated:
+        data_array = np.load('cloudcover_array.npy')
+        extent = (
+        np.min(target_lons), np.max(target_lons), np.min(target_lats),
+        np.max(target_lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 4.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        min = 0
+        max = 70000
+
+        levels = MaxNLocator(nbins=15).tick_values(min, max)
+
+        # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+        cmap = cm.get_cmap('RdYlBu_r')
+        norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+        # m.pcolormesh(lons, lats, correlation_array, extent=extent,
+        #             origin='lower',
+        #         interpolation='none',
+        #         cmap=cmap, vmin=min, vmax=max+1)
+
+        data_array_masked = np.ma.masked_where(np.isnan(data_array),
+                                        data_array)
+
+        m.pcolormesh(target_lons, target_lats, data_array_masked,
+                     cmap=cmap, norm=norm, vmin=min, vmax=max)
+
+        cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        cbar.ax.set_xlabel('Counts of cloud occurrence')
+        plt.tight_layout()
+        plt.savefig('CPO_multiyear_cloud_frequency_2004_2012.png',
+                    bbox_inches='tight')
+
+        plt.close()
+
+    years = np.arange(2004, 2011)
+
+    datetimes = []
+
+    for i in years:
+
+        year_lower = i
+        year_upper = i
+        month_lower = 6
+        month_upper = 8
+        day_lower = 1
+        day_upper = 31
+        hour_lower = 0
+        hour_upper = 23
+        minute_lower = 0
+        minute_upper = 45
+
+        time_params = np.array([year_lower, year_upper, month_lower,
+                                month_upper, day_lower, day_upper,
+                                hour_lower, hour_upper, minute_lower,
+                                minute_upper])
+
+        year_datetimes = utilities.get_datetime_objects(time_params)
+        datetimes = np.append(datetimes, year_datetimes)
+
+    root1 = '/soge-home/data/satellite/meteosat/seviri/15-min/0.03x0.03/cloudmask/nc/'
+    root2 = '/soge-home/projects/seviri_dust/raw_seviri_data/cloudmask_nc/'
+
+    year_cm_roots = [root1, root1, root1, root1, root1, root1, root1]
+
+    data_array = np.zeros(target_lons.shape)
+
+    for date_i in np.arange(0, len(datetimes)):
+        date = datetimes[date_i]
+        print date
+        year_bool = np.asarray(years == date.year)
+        root = np.asarray(year_cm_roots)[year_bool][0]
+        if root == root2:
+            # We're using TCH's daily cloudmask files. These are values from
+            #  0-2 (I think), and need selecting and regridding.
+            try:
+                clouddata = Dataset(root+date.strftime("%B%Y")+'/cloudmask_' + datetimes[
+                        date_i].strftime("%Y%m%d") + '.nc')
+            except:
+                print 'No cloud data for', date
+                continue
+            cloudmask_times = num2date(clouddata.variables['time'][:],
+                                       clouddata.variables['time'].units)
+            cloudmask_times = np.asarray([dt.datetime(j.year, j.month,
+                                                            j.day, j.hour,
+                                                            j.minute) for j
+                                          in cloudmask_times])
+            cloudmask_bool = cloudmask_times == datetimes[date_i]
+            clouds_data = clouddata.variables['cloud_mask'][:]
+            clouds_now = clouds_data[cloudmask_bool]
+
+            clouds_now_regridded = pinkdust.regrid_data(root2_lons, root2_lats,
+                                                        target_lons,
+                                                        target_lats,
+                                                        clouds_now, mesh=True)
+            data_array[clouds_now_regridded > 1] += 1
+
+        else:
+            # We're using Ian's original cloud mask files. These are just a
+            # binary one or zero and won't be regridded.
+            try:
+                clouddata = Dataset(root+
+                    datetimes[date_i].strftime("%B").upper(
+                    ) + str(datetimes[date_i].year) + '_CLOUDS/eumetsat.cloud.'
+                    + datetimes[
+                        date_i].strftime("%Y%m%d%H%M") + '.nc')
+            except:
+                print 'No cloud data for', date
+                continue
+            clouds_now = clouddata.variables['cmask'][:][0]
+            data_array[clouds_now == 1] += 1
+            if date.day == 31 and date.hour == 23 and date.minute == 45:
+                extent = (
+                np.min(target_lons), np.max(target_lons), np.min(target_lats),
+                np.max(target_lats))
+                m = Basemap(projection='cyl', llcrnrlon=extent[0],
+                            urcrnrlon=extent[1],
+                            llcrnrlat=extent[2], urcrnrlat=extent[3],
+                            resolution='i')
+
+                m.drawcoastlines(linewidth=0.5)
+                m.drawcountries(linewidth=0.5)
+                parallels = np.arange(10., 40, 2.)
+                # labels = [left,right,top,bottom]
+                m.drawparallels(parallels, labels=[False, True, True, False],
+                                linewidth=0.5)
+                meridians = np.arange(-20., 17., 4.)
+                m.drawmeridians(meridians, labels=[True, False, False, True],
+                                linewidth=0.5)
+
+                #levels = MaxNLocator(nbins=15).tick_values(min, max)
+
+                # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+                cmap = cm.get_cmap('RdYlBu_r')
+                #norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+                # m.pcolormesh(lons, lats, correlation_array, extent=extent,
+                #             origin='lower',
+                #         interpolation='none',
+                #         cmap=cmap, vmin=min, vmax=max+1)
+
+                data_array_masked = np.ma.masked_where(np.isnan(data_array),
+                                                data_array)
+
+                m.pcolormesh(target_lons, target_lats, data_array_masked,
+                             cmap=cmap)
+
+                cbar = plt.colorbar(orientation='horizontal', fraction=0.056,
+                                    pad=0.06)
+                cbar.ax.set_xlabel('Counts of cloud occurrence')
+                plt.tight_layout()
+                plt.savefig('CPO_multiyear_cloud_frequency_'+str(
+                    date.year)+'.png',
+                            bbox_inches='tight')
+
+                plt.close()
+
+                np.save('cloudcover_array'+str(date.year), data_array)
+
+    np.save('cloudcover_array', data_array)
+
+    extent = (np.min(target_lons), np.max(target_lons), np.min(target_lats),
+              np.max(target_lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+    parallels = np.arange(10., 40, 2.)
+    # labels = [left,right,top,bottom]
+    m.drawparallels(parallels, labels=[False, True, True, False],
+                    linewidth=0.5)
+    meridians = np.arange(-20., 17., 4.)
+    m.drawmeridians(meridians, labels=[True, False, False, True],
+                    linewidth=0.5)
+
+    min = 0
+    max = 70000
+
+    levels = MaxNLocator(nbins=15).tick_values(min, max)
+
+    # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+    cmap = cm.get_cmap('RdYlBu_r')
+    norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+    # m.pcolormesh(lons, lats, correlation_array, extent=extent,
+    #             origin='lower',
+    #         interpolation='none',
+    #         cmap=cmap, vmin=min, vmax=max+1)
+
+    data_array = np.ma.masked_where(np.isnan(data_array),
+                                    data_array)
+
+    m.pcolormesh(target_lons, target_lats, data_array,
+                 cmap=cmap, norm=norm, vmin=min, vmax=max)
+
+    cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+    cbar.ax.set_xlabel('Counts of cloud occurrence')
+    plt.tight_layout()
+    plt.savefig('CPO_multiyear_cloud_frequency_2004_2012.png',
+                bbox_inches='tight')
+
+    plt.close()
+
+
+def plot_multiyear_cpo_dust_assoc():
+    """
+    Plots a map the percentage of dust emission events which are associated
+    with a sweep from a CPO
+    :return:
+    """
+
+    # A CPO sweep at any given point in time is the sum of the CPO booleans
+    # (no greater than 1) - lasting for one hour after the end of the CPO
+    # Dust is associated with the CPO if it is contained within 50km of the
+    # CPO sweep
+
+    # Get lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    lons, lats = np.meshgrid(cloud_lons, cloud_lats)
+
+    # Get cpo archives
+    ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2004')
+    ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2005')
+    ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2006')
+    ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2007')
+    ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2008')
+    ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2009')
+    ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2010')
+    cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010]
+
+    archive_idx = 1
+
+    data_array = np.zeros((lons.shape))
+
+    for cpo_archive in cpo_archives:
+        print 'CPO archive', archive_idx
+        archive_idx += 1
+        archive_size = len(cpo_archive)
+        cpo_idx = 1
+        used_percentages = []
+        for i in cpo_archive:
+            if int((float(cpo_idx) / float(
+                    archive_size)) * 100) % 10 == 0 and int((float(
+                cpo_idx) / float(archive_size)) * 100) not in \
+                    used_percentages:
+                print str(int((float(cpo_idx) / float(
+                    archive_size)) * 100)) + "%"
+                # This percentage has been printed already
+                used_percentages.append(int((float(cpo_idx) / float(
+                    archive_size)) * 100))
+            cpo_idx += 1
+
+            cpo = cpo_archive[i]
+            cpo_bools = cpo.track_plume_bool
+
+            for j in cpo_bools:
+                cpo_bool = j.toarray()
+                data_array += cpo_bool
+
+    plt.close()
+
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+    parallels = np.arange(10., 40, 2.)
+    # labels = [left,right,top,bottom]
+    m.drawparallels(parallels, labels=[False, True, True, False],
+                    linewidth=0.5)
+    meridians = np.arange(-20., 17., 4.)
+    m.drawmeridians(meridians, labels=[True, False, False, True],
+                    linewidth=0.5)
+
+    min = 0
+    max = 20
+
+    levels = MaxNLocator(nbins=15).tick_values(min, max)
+
+    # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+    cmap = cm.get_cmap('Greys')
+    norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+    # m.pcolormesh(lons, lats, correlation_array, extent=extent,
+    #             origin='lower',
+    #         interpolation='none',
+    #         cmap=cmap, vmin=min, vmax=max+1)
+
+    data_array = np.ma.masked_where(np.isnan(data_array),
+                                         data_array)
+
+    m.pcolormesh(lons, lats, data_array,
+                 cmap=cmap, norm=norm, vmin=min, vmax=max)
+
+    cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+    cbar.ax.set_xlabel('Counts of CPO sweep occurrence')
+    plt.tight_layout()
+    plt.savefig('CPO_multiyear_sweep_frequency.png', bbox_inches='tight')
+
+    plt.close()
+
+def plot_multiyear_cpo_sweep_directions():
+    """
+    Plots a map of the sum of CPO sweeps across all years of data availability
+    :return:
+    """
+
+    # Get lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    lons, lats = np.meshgrid(cloud_lons, cloud_lats)
+
+    # Get cpo archives
+    ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2004')
+    ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2005')
+    ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2006')
+    ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2007')
+    ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2008')
+    ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2009')
+    ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2010')
+
+    cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010]
+
+    archive_idx = 1
+
+    data_array = np.zeros((lons.shape))
+    direction_data_array = np.zeros((lons.shape))
+    counts_array = np.zeros((lons.shape))
+
+    for cpo_archive in cpo_archives:
+        print 'CPO archive', archive_idx
+        archive_idx += 1
+        archive_size = len(cpo_archive)
+        cpo_idx = 1
+        used_percentages = []
+        for i in cpo_archive:
+            if int((float(cpo_idx) / float(
+                    archive_size)) * 100) % 10 == 0 and int((float(
+                cpo_idx) / float(archive_size)) * 100) not in \
+                    used_percentages:
+                print str(int((float(cpo_idx) / float(
+                    archive_size)) * 100)) + "%"
+                # This percentage has been printed already
+                used_percentages.append(int((float(cpo_idx) / float(
+                    archive_size)) * 100))
+            cpo_idx += 1
+
+            cpo = cpo_archive[i]
+            cpo_bools = cpo.track_plume_bool
+            cpo_directions = cpo.track_speed_centroid
+
+            for j in np.arange(0, len(cpo_bools)):
+                cpo_bool = cpo_bools[j].toarray()
+                data_array += cpo_bool
+                if np.isfinite(cpo_directions[j]):
+                    direction_data_array[cpo_bool == 1] += cpo_directions[j]
+                    counts_array += cpo_bool
+
+    plt.close()
+
+    direction_data_array = direction_data_array/counts_array
+
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+    parallels = np.arange(10., 40, 2.)
+    # labels = [left,right,top,bottom]
+    m.drawparallels(parallels, labels=[False, True, True, False],
+                    linewidth=0.5)
+    meridians = np.arange(-20., 17., 4.)
+    m.drawmeridians(meridians, labels=[True, False, False, True],
+                    linewidth=0.5)
+
+    min = 0
+    max = 50
+
+    levels = MaxNLocator(nbins=15).tick_values(min, max)
+
+    # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+    cmap = cm.get_cmap('coolwarm')
+    norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+    # m.pcolormesh(lons, lats, correlation_array, extent=extent,
+    #             origin='lower',
+    #         interpolation='none',
+    #         cmap=cmap, vmin=min, vmax=max+1)
+
+    direction_data_array = np.ma.masked_where(np.isnan(direction_data_array),
+                                         direction_data_array)
+
+    m.pcolormesh(lons, lats, direction_data_array,
+                 cmap=cmap, norm=norm, vmin=min, vmax=max)
+
+    cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+    cbar.ax.set_xlabel('CPO sweep direction')
+    plt.tight_layout()
+    plt.savefig('CPO_multiyear_sweep_direction.png', bbox_inches='tight')
+
+    plt.close()
+
+def plot_multiyear_cpo_sweep_speed():
+    """
+    Plots a map of the sum of CPO sweeps across all years of data availability
+    :return:
+    """
+
+    # Get lats and lons
+    cloud_test = Dataset(
+        '/soge-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/cloudmask'
+        '/nc/'
+        +
+        'JUNE2010_CLOUDS/eumetsat.cloud.'
+        + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    lons, lats = np.meshgrid(cloud_lons, cloud_lats)
+
+    # Get cpo archives
+    ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2004')
+    ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2005')
+    ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2006')
+    ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2007')
+    ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2008')
+    ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2009')
+    ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2010')
+    ca2011 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2011')
+    ca2012 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2012')
+
+    cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010,
+                    ca2011, ca2012]
+
+    archive_idx = 1
+
+    data_array = np.zeros((lons.shape))
+    direction_data_array = np.zeros((lons.shape))
+    counts_array = np.zeros((lons.shape))
+
+    for cpo_archive in cpo_archives:
+        print 'CPO archive', archive_idx
+        archive_idx += 1
+        archive_size = len(cpo_archive)
+        cpo_idx = 1
+        used_percentages = []
+        for i in cpo_archive:
+            if int((float(cpo_idx) / float(
+                    archive_size)) * 100) % 10 == 0 and int((float(
+                cpo_idx) / float(archive_size)) * 100) not in \
+                    used_percentages:
+                print str(int((float(cpo_idx) / float(
+                    archive_size)) * 100)) + "%"
+                # This percentage has been printed already
+                used_percentages.append(int((float(cpo_idx) / float(
+                    archive_size)) * 100))
+            cpo_idx += 1
+
+            cpo = cpo_archive[i]
+            cpo_bools = cpo.track_plume_bool
+            cpo_directions = cpo.track_speed_centroid
+
+            for j in np.arange(0, len(cpo_bools)):
+                cpo_bool = cpo_bools[j].toarray()
+                data_array += cpo_bool
+                if np.isfinite(cpo_directions[j]):
+                    direction_data_array[cpo_bool == 1] += cpo_directions[j]
+                    counts_array += cpo_bool
+
+    plt.close()
+
+    direction_data_array = direction_data_array/counts_array
+
+    extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+    m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                llcrnrlat=extent[2], urcrnrlat=extent[3],
+                resolution='i')
+
+    m.drawcoastlines(linewidth=0.5)
+    m.drawcountries(linewidth=0.5)
+    parallels = np.arange(10., 40, 2.)
+    # labels = [left,right,top,bottom]
+    m.drawparallels(parallels, labels=[False, True, True, False],
+                    linewidth=0.5)
+    meridians = np.arange(-20., 17., 4.)
+    m.drawmeridians(meridians, labels=[True, False, False, True],
+                    linewidth=0.5)
+
+    min = 0
+    max = 50
+
+    levels = MaxNLocator(nbins=15).tick_values(min, max)
+
+    # discrete_cmap = utilities.cmap_discretize(cm.RdYlBu_r, 10)
+    cmap = cm.get_cmap('coolwarm')
+    norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+    # m.pcolormesh(lons, lats, correlation_array, extent=extent,
+    #             origin='lower',
+    #         interpolation='none',
+    #         cmap=cmap, vmin=min, vmax=max+1)
+
+    direction_data_array = np.ma.masked_where(np.isnan(direction_data_array),
+                                         direction_data_array)
+
+    m.pcolormesh(lons, lats, direction_data_array,
+                 cmap=cmap, norm=norm, vmin=min, vmax=max)
+
+    cbar = plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+    cbar.ax.set_xlabel('CPO sweep speed')
+    plt.tight_layout()
+    plt.savefig('CPO_multiyear_sweep_speed.png', bbox_inches='tight')
+
+    plt.close()
+
+def plot_mechanism_pixel_piechart(pre_calculated=False):
+    """
+    Plots a pie chart showing the proportion of pre-merge pixels covered at
+    peak size associated with LLJs and CPOs
+    :return:
+    """
+
+    if pre_calculated:
+        counts = [2.41735814e+14, 7.81714255e+14]
+        fig, ax1 = plt.subplots()
+        labels = ['LLJ', 'Other (CPO)']
+        colors = ['cornflowerblue', 'lightcoral']
+        ax1.pie(counts, labels=labels, autopct='%1.1f%%', startangle=90,
+                colors=colors)
+        ax1.axis('equal')
+        plt.savefig('Emission_area_mechanism_partition.png')
+        plt.close()
+
+    else:
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v3_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v3_2012')
+        pa2013 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2013')
+        pa2014 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2014')
+        pa2015 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2015')
+        pa2016 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2016')
+        pa2017 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2017')
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012, pa2013, pa2014, pa2015,
+                          pa2016, pa2017]
+
+        archive_idx = 1
+
+        # Data array
+        counts = np.zeros((2))
+
+        for plume_archive in plume_archives:
+            print 'Plume archive', archive_idx
+            archive_idx += 1
+            archive_size = len(plume_archive)
+            plume_idx = 1
+            used_percentages = []
+            for i in plume_archive:
+                if int((float(plume_idx) / float(
+                        archive_size)) * 100) % 10 == 0 and int((float(
+                    plume_idx) / float(archive_size)) * 100) not in \
+                        used_percentages:
+                    print str(int((float(plume_idx) / float(
+                        archive_size)) * 100)) + "%"
+                    # This percentage has been printed already
+                    used_percentages.append(int((float(plume_idx) / float(
+                        archive_size)) * 100))
+                plume_idx += 1
+
+                plume = plume_archive[i]
+
+                if plume.merged:
+                    merge_idx = plume.merge_idx
+                    plume_areas = plume.track_area[0:merge_idx]
+                    if len(plume_areas) > 0:
+                        max_plume_area = np.max(plume_areas)
+                    else:
+                        continue
+                else:
+                    plume_areas = plume.track_area[:]
+                    if len(plume_areas) > 0:
+                        max_plume_area = np.max(plume_areas)
+                    else:
+                        continue
+
+                llj_prob = plume.LLJ_prob
+                if llj_prob == None:
+                    continue
+                if np.isnan(llj_prob):
+                    continue
+                elif np.isnan(max_plume_area):
+                    continue
+                else:
+                    if llj_prob > 0.5:
+                        counts[0] += max_plume_area
+                    else:
+                        counts[1] += max_plume_area
+
+            print counts
+
+        fig, ax1 = plt.subplots()
+        labels = ['LLJ', 'Other (CPO)']
+        print counts
+        ax1.pie(counts, labels=labels, autopct='%1.1f%%',
+                shadow=True, startangle=90)
+        ax1.axis('equal')
+        plt.savefig('Emission_area_emission_partition.png')
+        plt.close()
+
+def plot_mechanism_count_piechart(pre_calculated=False):
+    """
+    Plots a pie chart showing the proportion of pre-merge pixels covered at
+    peak size associated with LLJs and CPOs
+    :return:
+    """
+
+    if pre_calculated:
+        counts = [12185, 31571]
+        fig, ax1 = plt.subplots()
+        labels = ['LLJ', 'Other (CPO)']
+        colors = ['cornflowerblue', 'lightcoral']
+        ax1.pie(counts, labels=labels, autopct='%1.1f%%', startangle=90,
+                colors=colors)
+        ax1.axis('equal')
+        plt.savefig('Emission_count_partition.png')
+        plt.close()
+
+    else:
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v3_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v3_2012')
+        pa2013 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2013')
+        pa2014 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2014')
+        pa2015 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2015')
+        pa2016 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2016')
+        pa2017 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2017')
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012, pa2013, pa2014, pa2015,
+                          pa2016, pa2017]
+
+        archive_idx = 1
+
+        # Data array
+        counts = np.zeros((2))
+
+        for plume_archive in plume_archives:
+            print 'Plume archive', archive_idx
+            archive_idx += 1
+            archive_size = len(plume_archive)
+            plume_idx = 1
+            used_percentages = []
+            for i in plume_archive:
+                if int((float(plume_idx) / float(
+                        archive_size)) * 100) % 10 == 0 and int((float(
+                    plume_idx) / float(archive_size)) * 100) not in \
+                        used_percentages:
+                    print str(int((float(plume_idx) / float(
+                        archive_size)) * 100)) + "%"
+                    # This percentage has been printed already
+                    used_percentages.append(int((float(plume_idx) / float(
+                        archive_size)) * 100))
+                plume_idx += 1
+
+                plume = plume_archive[i]
+
+                llj_prob = plume.LLJ_prob
+                if llj_prob == None:
+                    continue
+                if np.isnan(llj_prob):
+                    continue
+
+                else:
+                    if llj_prob > 0.5:
+                        counts[0] += 1
+                    else:
+                        counts[1] += 1
+
+            print counts
+
+        fig, ax1 = plt.subplots()
+        labels = ['LLJ', 'Other (CPO)']
+        print counts
+        ax1.pie(counts, labels=labels, autopct='%1.1f%%',
+                shadow=True, startangle=90)
+        ax1.axis('equal')
+        plt.savefig('Emission_count_partition.png')
+        plt.close()
+
+def plot_cpo_diurnal_cycle():
+    """
+    Plots a diurnal cycle of emission frequency of cold pool outflows from
+    the samples available in the CPO archive
+    :return:
+    """
+
+    # Get cpo archives
+    ca2004 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2004')
+    ca2005 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2005')
+    ca2006 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2006')
+    ca2007 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2007')
+    ca2008 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2008')
+    ca2009 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2009')
+    ca2010 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2010')
+    ca2011 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2011')
+    ca2012 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_2012')
+    ca2013 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2013')
+    ca2014 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2014')
+    ca2015 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2015')
+    ca2016 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2016')
+    ca2017 = shelve.open('/soge-home/projects/seviri_dust/plumetracker/'
+                         'cpo_archive_v3_2017')
+    cpo_archives = [ca2004, ca2005, ca2006, ca2007, ca2008, ca2009, ca2010,
+                    ca2011, ca2012, ca2013, ca2014, ca2015, ca2016, ca2017]
+
+    # Get an array of datetimes at 15 minute resolution through the day
+    # Get a bool by matching the emission time from each CPO to these datetimes
+    # Then use that bool to increment a counter for each time of day
+    # Plot that and bob's your uncle
+
+    year_lower = 2013
+    year_upper = 2013
+    month_lower = 6
+    month_upper = 6
+    day_lower = 1
+    day_upper = 1
+    hour_lower = 0
+    hour_upper = 23
+    minute_lower = 0
+    minute_upper = 45
+
+    # Generate a set of datetimes for one day, and loop through just one day
+    time_params_oneday = np.array([year_lower, year_lower, month_lower,
+                                   month_lower, day_lower, day_lower,
+                                   hour_lower, hour_upper,
+                                   minute_lower, minute_upper])
+
+    # It doesn't particularly matter what the year, month, day is, as we'll
+    # just match the hour and minute
+
+
+    oneday_datetimes = utilities.get_datetime_objects(time_params_oneday)
+
+    diurnal_cycle = np.zeros((oneday_datetimes.shape))
+
+    archive_idx = 1
+
+    for plume_archive in cpo_archives:
+        print 'CPO archive', archive_idx
+        archive_idx += 1
+        archive_size = len(plume_archive)
+        plume_idx = 1
+        used_percentages = []
+        for i in plume_archive:
+            if int((float(plume_idx) / float(
+                    archive_size)) * 100) % 10 == 0 and int((float(
+                plume_idx) / float(archive_size)) * 100) not in \
+                    used_percentages:
+                print str(int((float(plume_idx) / float(
+                    archive_size)) * 100)) + "%"
+                # This percentage has been printed already
+                used_percentages.append(int((float(plume_idx) / float(
+                    archive_size)) * 100))
+            plume_idx += 1
+
+            plume = plume_archive[i]
+
+            emission_time = plume.dates_observed[0]
+            print emission_time
+            diurnal_cycle_bool = np.asarray([j.hour == emission_time.hour
+                                             and j.minute == emission_time.minute
+                                             for j in oneday_datetimes])
+            diurnal_cycle[diurnal_cycle_bool] += 1
+
+    plt.plot(oneday_datetimes, diurnal_cycle)
+    plt.xlabel('Time')
+    plt.ylabel('CPO emissions')
+    plt.savefig('CPO_emission_diurnal_cycle.png')
+
+def plot_interannual_dust_area():
+    """
+    Plots a bar chart with the total area of dust plumes emitted, quantified as
+    the peak area which each plume reaches before it merges with another or
+    dies
+    :return:
+    """
+
+def plot_tidihelt_dustsourcing(pre_calculated=False, res=20):
+    """
+    For each emission event in the Tidihelt region, plots the boolean of the
+    event and its centroid, as well as the gridded dust source map under a
+    slightly transparent bools map (constructed up to that point)
+    :return:
+    """
+
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    ianlons, ianlats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
+
+    tidihelt_emission_dates = np.load('tidihelt_emission_dates.npy')
+    for i in np.arange(0, len(tidihelt_emission_dates)):
+        emission_date = tidihelt_emission_dates[i]
+    midas_filename = '17667.60630.SYNOP.midas.gl.nc'
+    insalah = Dataset(midas_filename)
+
+    # Get lats and lons for the extremely generous Tidihelt region and get a
+    # linearly spaced 10 by 10 regular grid
+    linlats = np.linspace(24, 29, res)
+    linlons = np.linspace(-2, 4, res)
+
+    lons, lats = np.meshgrid(linlons, linlats)
+    data_array = np.zeros((lats.shape))
+    counts_array = np.zeros((lats.shape))
+    bool_data_array = np.zeros(ianlons.shape)
+
+    insalah_wspd = insalah.variables['WIND_SPEED'][:]
+    insalah_times = num2date(insalah.variables['TIME'][:],
+                             insalah.variables['TIME'].units)
+    insalah_wdir = insalah.variables['WIND_DIRECTION'][:]
+
+
+    # Lines to constrain to northeasterly
+    neerly_bool = np.asarray([j >= 0 and j <= 90 for j in insalah_wdir])
+    neerly_bool = neerly_bool == 1
+    insalah_wspd = insalah_wspd[neerly_bool]
+    insalah_times = insalah_times[neerly_bool]
+
+    archive_count = 1
+
+    bool_period = np.asarray(
+        [(j.year >= 2004 and j.year <=
+                            2012
+                            and j.month in [6, 7, 8]) for j in
+         insalah_times])
+    insalah_wspd = insalah_wspd[bool_period]
+    insalah_times = insalah_times[bool_period]
+    emission_wspds = []
+    no_emission_wspds = insalah_wspd
+    emission_times = []
+
+    if pre_calculated:
+
+        data_array = np.load('tidihelt_totals.npy')
+        counts_array = np.load('tidihelt_counts.npy')
+
+        data_array_mean = data_array / counts_array
+        #data_array_mean[counts_array < 5] = np.nan
+
+        plt.close()
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(25, 28, 0.5)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-1, 3, 0.5)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(counts_array, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+
+        m.scatter(insalah.variables['LON'][:], insalah.variables['LAT'][:])
+
+        m.contour(lons, lats, orog_regridded)
+
+        plt.tight_layout()
+        plt.savefig('Tidihelt_midas_counts.png', bbox_inches='tight')
+
+        plt.close()
+
+    else:
+
+        pa2004 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2004')
+        pa2005 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2005')
+        pa2006 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2006')
+        pa2007 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2007')
+        pa2008 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2008')
+        pa2009 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2009')
+        pa2010 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v4_2010')
+        pa2011 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v3_2011')
+        pa2012 = shelve.open('/ouce-home/projects/seviri_dust/plumetracker/'
+                             'plume_archive_flicker_v3_prob_v3_2012')
+        plume_archives = [pa2004, pa2005, pa2006, pa2007, pa2008, pa2009,
+                          pa2010, pa2011, pa2012]
+
+        fig, ax = plt.subplots()
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+
+        parallels = np.arange(10., 40, 2.)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-20., 17., 4.)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        for plume_archive in plume_archives:
+            print 'Plume archive', archive_count
+            archive_count += 1
+            plume_idx = 0
+            archive_size = len(plume_archive)
+            used_percentages = []
+            for i in plume_archive:
+                if int((float(plume_idx) / float(
+                        archive_size)) * 100) % 10 == 0 and int((float(
+                    plume_idx) / float(archive_size)) * 100) not in \
+                        used_percentages:
+                    print str(int((float(plume_idx) / float(
+                        archive_size)) * 100)) + "%"
+                    # This percentage has been printed already
+                    used_percentages.append(int((float(plume_idx) / float(
+                        archive_size)) * 100))
+                plume_idx += 1
+                plume = plume_archive[i]
+                emission_lat = plume.track_centroid_lat[0]
+                emission_lon = plume.track_centroid_lon[0]
+                emission_bool = plume.track_plume_bool[0].toarray()
+                if np.round(emission_lat, 0) in [25, 26, 27, 28
+                                                 ] and np.round(
+                    emission_lon, 0) in [-1, 0, 1, 2, 3]:
+                    emission_time = plume.emission_time
+                    # Find the nearest emission time from MIDAS 3-hourly
+                    available_hours = [0, 3, 6, 9, 12, 15, 18, 21]
+                    possible_times = [plume.emission_time.
+                                          replace(hour=available_hours[k],
+                                                  minute=0) for
+                                      k in
+                                                np.arange(0,
+                                                          len(available_hours))]
+                    time_differences = [abs(emission_time-j).total_seconds() for j
+                                        in
+                                        possible_times]
+                    nearest_time = np.asarray(possible_times)[
+                        time_differences==np.min(
+                        time_differences)]
+
+                    emission_time = nearest_time[0]
+                    time_bool = insalah_times == emission_time
+                    if np.all(time_bool == False):
+                        continue
+                    insalah_wspd_matched = insalah_wspd[time_bool][0]
+                    if np.ma.is_masked(insalah_wspd_matched):
+                        continue
+                    emission_wspds.append(insalah_wspd_matched)
+                    emission_times.append(emission_time)
+                    diff_array_lat = abs(lats - emission_lat)
+                    diff_array_lon = abs(lons - emission_lon)
+                    latbool = diff_array_lat == np.min(diff_array_lat)
+                    lonbool = diff_array_lon == np.min(diff_array_lon)
+                    union_bool = latbool & lonbool
+                    data_array[union_bool] += insalah_wspd_matched
+                    counts_array[union_bool] += 1
+                    bool_data_array[emission_bool] += 1
+
+                    # Here mask the emission bool and centroid and plot
+                    # Underneath should be data_array
+                    emission_bool = np.ma.masked_where(emission_bool ==
+                                                       False, emission_bool)
+
+                    print np.unique(counts_array)
+                    print np.unique(bool_data_array)
+
+                    grid = m.pcolormesh(lons, lats, counts_array, vmin=0,
+                                     vmax=70,
+                                 cmap=cm.YlOrBr)
+                    boolarr = m.pcolormesh(ianlons, ianlats, bool_data_array,
+                                   vmin=0, vmax=70, alpha=0.5, cmap=cm.YlOrBr)
+                    nowbool = m.pcolormesh(ianlons, ianlats, emission_bool,
+                                 cmap=cm.YlOrBr_r)
+                    nowgrid = m.scatter(emission_lon, emission_lat,
+                                        marker='+', s=80,
+                              color='blue')
+
+                    plt.savefig('Tidihelt_emission_plume_'+str(
+                        archive_count)+"_"+str(i)+".png")
+
+                    grid.remove()
+                    boolarr.remove()
+                    nowbool.remove()
+                    nowgrid.remove()
+
+        plt.close()
+
+        remove_bool = np.asarray([j in emission_times for j in insalah_times])
+        no_emission_wspds = np.asarray(no_emission_wspds)
+        no_emission_wspds[remove_bool] = -999
+
+        no_emission_wspds = no_emission_wspds[no_emission_wspds!=-999]
+
+        #emission_wspds = emission_wspds[emission_wspds < 100]
+        no_emission_wspds = no_emission_wspds[no_emission_wspds < 100]
+
+        np.save('tidihelt_totals', data_array)
+        np.save('tidihelt_counts', counts_array)
+
+        data_array_mean = data_array/counts_array
+
+        plt.close()
+
+        extent = (np.min(lons), np.max(lons), np.min(lats), np.max(lats))
+        m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
+                    llcrnrlat=extent[2], urcrnrlat=extent[3],
+                    resolution='i')
+
+        m.drawcoastlines(linewidth=0.5)
+        m.drawcountries(linewidth=0.5)
+        parallels = np.arange(25, 28, 0.5)
+        # labels = [left,right,top,bottom]
+        m.drawparallels(parallels, labels=[False, True, True, False],
+                        linewidth=0.5)
+        meridians = np.arange(-1, 3, 0.5)
+        m.drawmeridians(meridians, labels=[True, False, False, True],
+                        linewidth=0.5)
+
+        # m.contourf(lons, lats, data_array)
+        discrete_cmap = utilities.cmap_discretize(cm.YlOrBr, 10)
+        m.imshow(data_array_mean, extent=extent, origin='lower',
+                 interpolation='none',
+                 cmap=discrete_cmap)
+
+        plt.colorbar(orientation='horizontal', fraction=0.056, pad=0.06)
+        m.scatter(insalah.variables['LON'][:], insalah.variables['LAT'][:])
+        plt.tight_layout()
+        plt.savefig('Tidihelt_midas_wspd_time_matched_northeasterly.png',
+                    bbox_inches='tight')
+
+        plt.close()
+
+        fig, ax = plt.subplots()
+        bins = np.arange(0, 45, 5)
+        ax.hist(emission_wspds, bins=bins, color='cornflowerblue',
+                label='Dust '
+                                                                      'activation '
+                                                                      'event',
+                alpha=0.5)
+        ax.hist(no_emission_wspds, bins=bins, color='lightcoral', label='No '
+                                                                      'dust '
+                                                                     'activation '
+                                                                     'event',
+                alpha=0.5)
+        plt.legend()
+        ax.set_xlabel('0900UTC In Salah MIDAS wind speed')
+        ax.set_ylabel('Frequency')
+        plt.savefig('midas_comparison_distributions_northeasterly.png')
+
+        plt.close()
+
+
+
+
 
 
 

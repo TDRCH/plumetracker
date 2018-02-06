@@ -2,7 +2,6 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
-from netCDF4 import num2date
 import numpy as np
 from mpl_toolkits.basemap import Basemap
 import datetime
@@ -21,7 +20,6 @@ from copy import deepcopy
 import cv2
 from skimage import io, morphology, img_as_bool, segmentation
 from scipy.ndimage import measurements
-from pyresample import utils
 
 import utilities
 import plumes
@@ -29,11 +27,20 @@ import pinkdust
 import plotting
 import get_llj_prob_model
 
-def cloud_mask_mw(i, datetimes, oneday_datetimes, ianlons, ianlats):
+def cloud_mask_mw(i, datetimes, oneday_datetimes):
     """
     Moving window cloud masking to be used by multiprocessing
     :return:
     """
+
+    # Get lats and lons
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
 
     date = oneday_datetimes[i]
     window_datetime_lower = datetime.datetime(datetimes[0].year,
@@ -64,15 +71,15 @@ def cloud_mask_mw(i, datetimes, oneday_datetimes, ianlons, ianlats):
         time_params_7dayw)
 
     bt_15day = np.zeros((datetimes_7dayw.shape[0], 3,
-                         ianlats.shape[0],
-                         ianlons.shape[0]))
+                         lats.shape[0],
+                         lons.shape[1]))
 
     print str(oneday_datetimes[i].hour) + '_' + str(
             oneday_datetimes[i].minute)
 
     g = tables.open_file(
         '/soge-home/projects/seviri_dust/sdf/intermediary_files/bt_15d_' +
-        str(oneday_datetimes[i].year) +
+        str(oneday_datetimes[i].year) + '_' + str(oneday_datetimes[i].month) +
         '_' + str(oneday_datetimes[i].hour) +
         '_' + str(
             oneday_datetimes[i].minute) + '.hdf', 'w')
@@ -111,43 +118,12 @@ def cloud_mask_mw(i, datetimes, oneday_datetimes, ianlons, ianlats):
             if os.path.isfile(filename):
                 btdata = Dataset(filename, 'r')
             else:
-                filename = '/ouce-home/data/satellite/meteosat/seviri/15-min/' \
-                           '0.03x0.03/bt/nc' \
-                           '/SEPT' + str(date_w.year) + \
-                           '/H-000-MSG1__-MSG1________-' \
-                           'IR_BrightnessTemperatures___-000005___-' + str(
-                    date_w.strftime('%Y')) + str(date_w.strftime('%m')) + \
-                           str(date_w.strftime('%d')) + str(date_w.strftime('%H')) \
-                           + str(date_w.strftime('%M')) + '-__.nc'
-                if os.path.isfile(filename):
-                    btdata = Dataset(filename, 'r')
-                else:
-                    filename = '/ouce-home/data/satellite/meteosat/seviri/15-min/' \
-                               '0.03x0.03/bt/nc' \
-                               '/SEPT' + str(date_w.year) + \
-                               '/H-000-MSG2__-MSG2________-' \
-                               'IR_BrightnessTemperatures___-000005___-' + str(
-                        date_w.strftime('%Y')) + str(date_w.strftime('%m')) + \
-                               str(date_w.strftime('%d')) + str(
-                        date_w.strftime('%H')) \
-                               + str(date_w.strftime('%M')) + '-__.nc'
-                    if os.path.isfile(filename):
-                        btdata = Dataset(filename, 'r')
-                    else:
-                        print 'Found no BT data for ' + filename
-                        bts[j, :] = np.nan
-                        continue
+                print 'Found no BT data for ' + filename
+                continue
 
         bt087 = btdata.variables['bt087'][:][0]
         bt108 = btdata.variables['bt108'][:][0]
         bt120 = btdata.variables['bt120'][:][0]
-
-        #bt087 = pinkdust.regrid_data(lons, lats, ianlons, ianlats,
-         #                               bt087, mesh=False)
-        #bt108 = pinkdust.regrid_data(lons, lats, ianlons, ianlats,
-        #                                bt108, mesh=False)
-        #bt120 = pinkdust.regrid_data(lons, lats, ianlons, ianlats,
-        #                                bt120, mesh=False)
 
         bts[j, 0] = bt087
         bts[j, 1] = bt108
@@ -158,12 +134,32 @@ def cloud_mask_mw(i, datetimes, oneday_datetimes, ianlons, ianlats):
     g.close()
 
 def detect_cpo(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
-               btdiff_2_anom_prev_3, datetimes, datestrings, date_i, lons,
-               lats,
-               cloud_lons, cloud_lats,
-               daily_clouds=False, double_digits=False, mesh=False,
-               daily_bt=False):
+               btdiff_2_anom_prev_3, datetimes, datestrings, date_i):
 
+    # Get lats and lons
+    sdf_test = Dataset(
+        '/soge-home/data_not_backed_up/satellite/meteosat/seviri'
+        '/15-min/0.03x0.03/sdf/nc/JUNE2010/SDF_v2/SDF_v2.'
+        '201006031500.nc')
+
+    lons, lats = np.meshgrid(sdf_test.variables['longitude'][:],
+                             sdf_test.variables['latitude'][:])
+
+    # Get cloud lats and lons
+    cloud_test = Dataset(
+            '/soge-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/cloudmask'
+            '/nc/'
+            +
+            'JUNE2010_CLOUDS/eumetsat.cloud.'
+            + '201006031500.nc')
+    cloud_lons = cloud_test.variables['lon'][:]
+    cloud_lats = cloud_test.variables['lat'][:]
+    cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
+    lonmask = lons > 360
+    latmask = lats > 90
+    lons = np.ma.array(lons, mask=lonmask)
+    lats = np.ma.array(lats, mask=latmask)
     used_ids = []
 
     runtime = datetimes[date_i] - datetimes[0]
@@ -172,114 +168,90 @@ def detect_cpo(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
 
     found_file = True
 
-    if daily_bt == False:
-        if os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/15-min/'
-                          '0.03x0.03/bt'
-                          '/nc/'
-                                  +
-                                  datetimes[date_i].strftime("%B").upper(
-                                  ) + str(
-            datetimes[date_i].year) + '/H-000-MSG2__'
-                                      '-MSG2________-'
-                                      'IR_BrightnessTemperatures___'
-                                      '-000005___-'
-                                  + datestrings[date_i] +
-                                  '-__.nc'):
-            bt = Dataset(
-                '/ouce-home/data/satellite/meteosat/seviri/15-min/'
-                '0.03x0.03/bt'
-                '/nc/'
-                +
-                datetimes[date_i].strftime("%B").upper(
-                ) + str(datetimes[date_i].year) + '/H-000-MSG2__'
-                                                  '-MSG2________-'
-                                                  'IR_BrightnessTemperatures___'
-                                                  '-000005___-'
-                + datestrings[date_i] +
-                '-__.nc')
-            found_file = True
-        elif os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/15-min/'
-                            '0.03x0.03/bt'
-                            '/nc/'
-                                    +
-                                    datetimes[date_i].strftime("%B").upper(
-                                    ) + str(
-            datetimes[date_i].year) + '/H-000-MSG1__'
-                                      '-MSG1________-'
-                                      'IR_BrightnessTemperatures___'
-                                      '-000005___-'
-                                    + datestrings[date_i] +
-                                    '-__.nc'):
-            bt = Dataset(
-                '/ouce-home/data/satellite/meteosat/seviri/15-min/'
-                '0.03x0.03/bt'
-                '/nc/'
-                +
-                datetimes[date_i].strftime("%B").upper(
-                ) + str(datetimes[date_i].year) + '/H-000-MSG1__'
-                                                  '-MSG1________-'
-                                                  'IR_BrightnessTemperatures___'
-                                                  '-000005___-'
-                + datestrings[date_i] +
-                '-__.nc')
-            found_file = True
-        else:
-            found_file = False
+    if os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/bt'
+        '/nc/'
+        +
+        datetimes[date_i].strftime("%B").upper(
+        ) + str(datetimes[date_i].year) + '/H-000-MSG2__'
+                                          '-MSG2________-'
+                                          'IR_BrightnessTemperatures___'
+                                          '-000005___-'
+        + datestrings[date_i] +
+        '-__.nc'):
+        bt = Dataset(
+            '/ouce-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/bt'
+            '/nc/'
+            +
+            datetimes[date_i].strftime("%B").upper(
+            ) + str(datetimes[date_i].year) + '/H-000-MSG2__'
+                                              '-MSG2________-'
+                                              'IR_BrightnessTemperatures___'
+                                              '-000005___-'
+            + datestrings[date_i] +
+            '-__.nc')
+    elif os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/15-min/'
+        '0.03x0.03/bt'
+        '/nc/'
+        +
+        datetimes[date_i].strftime("%B").upper(
+        ) + str(datetimes[date_i].year) + '/H-000-MSG1__'
+                                          '-MSG1________-'
+                                          'IR_BrightnessTemperatures___'
+                                          '-000005___-'
+        + datestrings[date_i] +
+        '-__.nc'):
+        bt = Dataset(
+            '/ouce-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/bt'
+            '/nc/'
+            +
+            datetimes[date_i].strftime("%B").upper(
+            ) + str(datetimes[date_i].year) + '/H-000-MSG1__'
+                                              '-MSG1________-'
+                                              'IR_BrightnessTemperatures___'
+                                              '-000005___-'
+            + datestrings[date_i] +
+            '-__.nc')
 
-    if daily_clouds:
-        try:
-            cloudmask = Dataset('/soge-home/projects/seviri_dust/raw_seviri_'
-                                'data/cloudmask_nc/'+datetimes[
-                date_i].strftime("%B%Y")+'/cloudmask_' + datetimes[
-                date_i].strftime("%Y%m%d") + '.nc')
-            cloudmask_times = num2date(cloudmask.variables['time'][:],
-                                       cloudmask.variables['time'].units)
-            cloudmask_times = np.asarray([datetime.datetime(j.year, j.month,
-                                                      j.day, j.hour,
-                                                            j.minute) for j
-                                          in cloudmask_times])
-
-            cloudmask_bool = cloudmask_times == datetimes[date_i]
-            print np.all(cloudmask.variables['cloud_mask'][0] == \
-                  cloudmask.variables['cloud_mask'][30])
-            clouds_now = cloudmask.variables['cloud_mask'][cloudmask_bool][0]
-            found_file = True
-        except:
-            print 'Found no cloud mask file!'
-            clouds_now = np.zeros(cloud_lons.shape)
-            found_file = False
-    else:
-        try:
-            cloudmask = Dataset(
-                '/soge-home/data/satellite/meteosat/seviri/15-min/'
-                '0.03x0.03/cloudmask'
-                '/nc/'
-                +
-                datetimes[date_i].strftime("%B").upper(
-                ) + str(datetimes[date_i].year) + '_CLOUDS/eumetsat.cloud.'
-                + datestrings[date_i] + '.nc')
-            clouds_now = cloudmask.variables['cmask'][:][0]
-            cloud_lons = cloudmask.variables['lon'][:]
-            cloud_lats = cloudmask.variables['lat'][:]
-        except:
-            clouds_now = np.zeros(cloud_lons.shape)
-            found_file = False
-            print 'Found no cloud mask file!'
+    try:
+        cloudmask = Dataset(
+            '/soge-home/data/satellite/meteosat/seviri/15-min/'
+            '0.03x0.03/cloudmask'
+            '/nc/'
+            +
+            datetimes[date_i].strftime("%B").upper(
+            ) + str(datetimes[date_i].year) + '_CLOUDS/eumetsat.cloud.'
+            + datestrings[date_i] + '.nc')
+        clouds_now = cloudmask.variables['cmask'][:][0]
+        cloud_lons = cloudmask.variables['lon'][:]
+        cloud_lats = cloudmask.variables['lat'][:]
+    except:
+        clouds_now = np.zeros(cloud_lons.shape)
+        found_file = False
 
     if found_file:
+        # Produce 12-10.8 imagery
+        bt087 = bt.variables['bt087'][:][0]
+        bt12 = bt.variables['bt120'][:][0]
+        bt108 = bt.variables['bt108'][:][0]
 
-        if daily_bt == False:
-            bt087 = bt.variables['bt087'][:][0]
-            bt12 = bt.variables['bt120'][:][0]
-            orig_lons = bt.variables['longitude'][:]
-            orig_lats = bt.variables['latitude'][:]
-            orig_lons, orig_lats = np.meshgrid(orig_lons, orig_lats)
-        else:
-            orig_lons = lons
-            orig_lats = lats
+        orig_lons = bt.variables['longitude'][:]
+        orig_lats = bt.variables['latitude'][:]
 
         # print bt12.shape
         # print clouds_now.shape
+
+        f = tables.open_file(
+            '/soge-home/projects/seviri_dust/sdf/intermediary_files/bt_15d_' +
+            str(datetimes[date_i].year) + '_' + str(
+                datetimes[date_i].month) + '_' +
+            str(datetimes[date_i].hour) + '_' + str(
+                datetimes[date_i].minute) + '.hdf')
+        arrobj = f.get_node('/data')
+        bt_15day = arrobj.read()
+        f.close()
 
         window_datetime_lower = datetime.datetime(datetimes[0].year,
                                                   datetimes[0].month,
@@ -313,35 +285,10 @@ def detect_cpo(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
         datetimes_7dayw = utilities.get_daily_datetime_objects(
             time_params_7dayw)
 
-        indices = np.arange(0, len(datetimes_7dayw))
-        lower_ind = datetimes_7dayw == BT_15_day_lower_bound
-        lower_ind = indices[lower_ind][0]
-        upper_ind = datetimes_7dayw == BT_15_day_upper_bound
-        upper_ind = indices[upper_ind][0]
-        current_ind = datetimes_7dayw == datetimes[date_i]
-        current_ind = indices[current_ind][0]
-
-        if double_digits:
-            f = tables.open_file(
-                '/soge-home/projects/seviri_dust/sdf/intermediary_files'
-                '/bt_15d_' + datetimes[date_i].strftime('%Y_%H_%M') + '.hdf')
-            BT_15_days = f.root.data[lower_ind:upper_ind]
-            bt_data = f.root.data[current_ind]
-            f.close()
-        else:
-            f = tables.open_file(
-                '/soge-home/projects/seviri_dust/sdf/intermediary_files'
-                '/bt_15d_' + str(datetimes[date_i].year) +
-        '_' + str(datetimes[date_i].hour) +
-        '_' + str(
-            datetimes[date_i].minute) + '.hdf')
-            BT_15_days = f.root.data[lower_ind:upper_ind]
-            bt_data = f.root.data[current_ind]
-            f.close()
-
-        if daily_bt:
-            bt087 = bt_data[0]
-            bt12 = bt_data[2]
+        BT_15_days = \
+            bt_15day[np.asarray([j >= BT_15_day_lower_bound
+                                 and j <= BT_15_day_upper_bound
+                                 for j in datetimes_7dayw])]
 
         bt_15day_087 = BT_15_days[:, 0]
         #bt_15day_108 = BT_15_days[:, 1]
@@ -353,50 +300,43 @@ def detect_cpo(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
 
         btdiff_2_15daymean = bt_15day_120_mean - bt_15day_087_mean
 
-        if mesh:
-            cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
-
-        clouds_now_regridded = pinkdust.regrid_data(cloud_lons, cloud_lats,
-                                                orig_lons, orig_lats,
-                                                clouds_now, mesh=True)
-
-
-        """
+        orig_lons, orig_lats = np.meshgrid(orig_lons, orig_lats)
 
         bt087_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
                                                cloud_lons,
-                                               cloud_lats, bt087, mesh=True)
+                                               cloud_lats, bt087)
 
         bt12_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
                                               cloud_lons,
-                                              cloud_lats, bt12, mesh=True)
+                                              cloud_lats, bt12)
 
         btdiff_2_15daymean_regridded = pinkdust.regrid_data(orig_lons,
                                                             orig_lats,
                                                             cloud_lons,
                                                             cloud_lats,
-                                                            btdiff_2_15daymean, mesh=True)
+                                                            btdiff_2_15daymean)
 
-        """
+        btdiff_2 = bt12_regridded - bt087_regridded
+        btdiff_2_anom = btdiff_2 - btdiff_2_15daymean_regridded
 
-        btdiff_2 = bt12 - bt087
-        btdiff_2_anom = btdiff_2 - btdiff_2_15daymean
+        btdiff_2_anom[clouds_now > 0] = np.nan
 
         if btdiff_2_anom_prev_3 != None:
-
+            # Get the difference between this timestep and the one two
+            # timesteps before
             btdiff_2_anom_diff = btdiff_2_anom - btdiff_2_anom_prev_3
+            orig_btdiff_2_anom_diff = deepcopy(btdiff_2_anom_diff)
             btdiff_2_anom_diff += \
-                (btdiff_2_anom - btdiff_2_anom_prev_2)
+                orig_btdiff_2_anom_diff - btdiff_2_anom_prev_2
             btdiff_2_anom_diff += \
-                (btdiff_2_anom - btdiff_2_anom_prev)
+                orig_btdiff_2_anom_diff - btdiff_2_anom_prev
         else:
             btdiff_2_anom_diff = np.zeros((btdiff_2_anom.shape))
-
         if date_i == 0:
-            btdiff_2_anom_prev = deepcopy(btdiff_2_anom)
+            btdiff_2_anom_prev = btdiff_2_anom
         elif date_i == 1:
             btdiff_2_anom_prev_2 = deepcopy(btdiff_2_anom_prev)
-            btdiff_2_anom_prev = deepcopy(btdiff_2_anom)
+            btdiff_2_anom_prev = btdiff_2_anom
         elif date_i == 2:
             btdiff_2_anom_prev_3 = deepcopy(btdiff_2_anom_prev_2)
             btdiff_2_anom_prev_2 = deepcopy(btdiff_2_anom_prev)
@@ -406,18 +346,14 @@ def detect_cpo(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
             btdiff_2_anom_prev_2 = deepcopy(btdiff_2_anom_prev)
             btdiff_2_anom_prev = deepcopy(btdiff_2_anom)
 
-        if daily_clouds:
-            clouds_now_regridded = clouds_now_regridded > 1
-
         lat_grad, lon_grad = np.gradient(btdiff_2_anom)
         total_grad = np.sqrt(lat_grad ** 2 + lon_grad ** 2)
-        convolution = scipy.signal.convolve2d(clouds_now_regridded,
+        convolution = scipy.signal.convolve2d(clouds_now,
                                               np.ones((5,
                                                        5)),
                                               mode='same')
         clouds_now = convolution > 0
         total_grad[clouds_now == 1] = np.nan
-
 
         ### PASS I ###
         # In the FIRST PASS the LORD sayeth unto the image, 'Let all
@@ -436,9 +372,7 @@ def detect_cpo(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
         btdiff_2_anom_diff[clouds_now > 0] = np.nan
 
         cpo_mask_pass_1 = btdiff_2_anom_diff < -7
-
         label_objects, nb_labels = ndi.label(cpo_mask_pass_1)
-
         sizes = np.bincount(label_objects.ravel())
         # Set clusters smaller than size 20 to zero
         mask_sizes = sizes > 20
@@ -474,7 +408,6 @@ def detect_cpo(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
             else:
                 cpo_mask_pass_2[target_region == 1] = 0
 
-
         # For identified CPO regions, undo the convolution on the cloud
         # mask
 
@@ -487,65 +420,13 @@ def detect_cpo(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
         blob_ids = np.unique(cpo_mask_um)
         blob_ids = blob_ids[blob_ids != 0]
 
-        if 1 in cpo_mask_pass_2:
-            for i in np.arange(0, len(blob_ids)):
-                target_region = cpo_mask_um == blob_ids[i]
-                if 1 in cpo_mask_pass_2[target_region]:
-                #if np.any(cpo_mask_pass_2[target_region == 1] == 1):
-                    cpo_mask_pass_2[target_region] = 1
-
-        extent = (
-            np.min(orig_lons), np.max(orig_lons), np.min(orig_lats),
-            np.max(
-                orig_lats))
-        m = Basemap(projection='cyl', llcrnrlon=extent[0],
-                    urcrnrlon=extent[1],
-                    llcrnrlat=extent[2], urcrnrlat=extent[3],
-                    resolution='i')
-
-        m.drawcoastlines(linewidth=0.5)
-        m.drawcountries(linewidth=0.5)
-        parallels = np.arange(10., 40, 2.)
-        # labels = [left,right,top,bottom]
-        m.drawparallels(parallels, labels=[False, True, True, False],
-                        linewidth=0.5)
-        meridians = np.arange(-20., 17., 4.)
-        m.drawmeridians(meridians, labels=[True, False, False, True],
-                        linewidth=0.5)
-
-        min = 5
-        max = -15
-
-        levels = MaxNLocator(nbins=15).tick_values(min, max)
-
-        cmap = cm.get_cmap('Blues_r')
-        norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
-
-        #print np.unique(btdiff_2_anom_diff[np.isfinite(btdiff_2_anom_diff)])
-
-        m.pcolormesh(orig_lons, orig_lats, btdiff_2_anom_diff,
-                     cmap=cmap, vmin=min, vmax=max, norm=norm)
-
-        cbar = plt.colorbar(orientation='horizontal', fraction=0.056,
-                            pad=0.06)
-        cbar.ax.set_xlabel('CPO mask pass 2')
-        plt.tight_layout()
-        plt.savefig('btdiff_' + datestrings[
-            date_i] + '.png',
-                    bbox_inches='tight')
-
-        plt.close()
+        for i in np.arange(0, len(blob_ids)):
+            target_region = cpo_mask_um == blob_ids[i]
+            if np.any(cpo_mask_pass_2[target_region == 1] == 1):
+                cpo_mask_pass_2[target_region == 1] = 1
 
         return cpo_mask_pass_2, btdiff_2_anom_prev, btdiff_2_anom_prev_2,\
                btdiff_2_anom_prev_3
-
-    else:
-        if mesh:
-            empty_arr = np.zeros((lats.shape[0], lons.shape[1]))
-        else:
-            empty_arr  = np.zeros((lats.shape[0], lons.shape[0]))
-        empty_arr[:] = np.nan
-        return empty_arr, None, None, None
 
 if __name__ == '__main__':
 
@@ -555,9 +436,9 @@ if __name__ == '__main__':
     year_upper = 2010
     month_lower = 7
     month_upper = 7
-    day_lower = 1
-    day_upper = 1
-    hour_lower = 0
+    day_lower = 30
+    day_upper = 31
+    hour_lower = 18
     hour_upper = 23
     minute_lower = 0
     minute_upper = 45
@@ -690,15 +571,8 @@ if __name__ == '__main__':
             bt = Dataset(
                 '/ouce-home/data/satellite/meteosat/seviri/15-min/'
                 '0.03x0.03/bt'
-                '/nc/'
-                +
-                datetimes[date_i].strftime("%B").upper(
-                ) + str(datetimes[date_i].year) + '/H-000-MSG1__'
-                                                  '-MSG1________-'
-                                                  'IR_BrightnessTemperatures___'
-                                                  '-000005___-'
-                + datestrings[date_i] +
-                '-__.nc')
+                '/nc/'+datetimes[date_i].strftime("%B").upper() + str(
+                    datetimes[date_i].year) + '/H-000-MSG1__-MSG1________-IR_BrightnessTemperatures___-000005___-'+ datestrings[date_i] + '-__.nc')
             found_file = True
         else:
             found_file = False
@@ -711,7 +585,8 @@ if __name__ == '__main__':
                 '/nc/'
                 +
                 datetimes[date_i].strftime("%B").upper(
-                ) + str(datetimes[date_i].year) + '_CLOUDS/eumetsat.cloud.')
+                ) + str(datetimes[date_i].year) + '_CLOUDS/eumetsat.cloud.'
+                + datestrings[date_i] + '.nc')
             clouds_now = cloudmask.variables['cmask'][:][0]
             cloud_lons = cloudmask.variables['lon'][:]
             cloud_lats = cloudmask.variables['lat'][:]
@@ -729,9 +604,16 @@ if __name__ == '__main__':
             orig_lons = bt.variables['longitude'][:]
             orig_lats = bt.variables['latitude'][:]
 
+
+            #print bt12.shape
+            #print clouds_now.shape
+
             f = tables.open_file(
-                '/soge-home/projects/seviri_dust/sdf/intermediary_files'
-                '/bt_15d_'+datetimes[date_i].strftime('%Y_%H_%M')+'.hdf')
+                '/soge-home/projects/seviri_dust/sdf/intermediary_files/bt_15d_' +
+                str(datetimes[date_i].year) + '_' + str(
+                    datetimes[date_i].month) + '_' +
+                str(datetimes[date_i].hour) + '_' + str(
+                    datetimes[date_i].minute) + '.hdf')
             arrobj = f.get_node('/data')
             bt_15day = arrobj.read()
             f.close()
@@ -799,6 +681,26 @@ if __name__ == '__main__':
             btdiff_2_anom = btdiff_2 - btdiff_2_15daymean_regridded
 
             if btdiff_2_anom_prev_3 != None:
+                # Get the difference between this timestep and the one two
+                # timesteps before
+                # But if it takes the diff between a field with a cloud mask
+                #  and one now, the cloud mask will always expand through
+                # time - so say the first field has no cloud, second field
+                # has tons. First field has no mask, second has tons. Diff
+                # for second will have tons. Third has none. Diff for third
+                # to second is tons, third to first is zero, so add them and
+                #  third has tons. If there's then zero for the next three
+                # timesteps
+
+                # So the error is presumably from where the difference with
+                # the previous is taken.
+
+                # Question is, should it be possible to be rid of the cloud
+                # in the first timestep
+                # anom is screened and has loads of cloud
+                # then in the next timestep there's none - diff field has loads
+                # in the next timestep, still none - diff field has loads
+                # next timestep, still none - diff field has loads
 
                 btdiff_2_anom_diff = btdiff_2_anom-btdiff_2_anom_prev_3
                 btdiff_2_anom_diff += \
@@ -849,7 +751,6 @@ if __name__ == '__main__':
 
             btdiff_2_anom_diff_um = deepcopy(btdiff_2_anom_diff)
             btdiff_2_anom_diff[clouds_now > 0] = np.nan
-
 
             cpo_mask_pass_1 = btdiff_2_anom_diff < -7
             label_objects, nb_labels = ndi.label(cpo_mask_pass_1)

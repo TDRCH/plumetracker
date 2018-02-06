@@ -10,6 +10,7 @@ import numpy as np
 import datetime
 from netCDF4 import Dataset
 from netCDF4 import date2num
+from netCDF4 import num2date
 from mpl_toolkits.basemap import Basemap
 import os
 import tables
@@ -46,6 +47,120 @@ def cloud_screen(btdata, clouddata):
 
     return seviribands, channel_087, channel_108, channel_120
 
+def cloud_screen_daily(btdata, clouddata, date):
+    """
+    Cloud screens SEVIRI data using EUMETSAT cloud screen
+    :param btdata: an nc Dataset object with the three SEVIRI bands for 10.8,
+    12.0, 8.7 BTs
+    :param cloudscreendata: an nc Dataset object from EUMETSAT's SEVIRI cloud
+    screen
+    :return cloudscreenedbt: cloud screened SEVIRI band array for the given
+    day
+    """
+    #print 'sdf 1'
+    btdata_time = num2date(btdata.variables['time'][:], btdata.variables[
+        'time'].units)
+    clouddata_time = num2date(clouddata.variables['time'][:],
+                              clouddata.variables['time'].units)
+
+    if None in list(clouddata_time):
+        cloudscreen = np.zeros(clouddata.variables['cloud_mask'][0].shape)
+        print 'No dates in this file! Replaced array with nans!'
+        cloudscreen[:] = np.nan
+    else:
+        clouddata_time = np.asarray([datetime.datetime(j.year, j.month, j.day,
+                                                   j.hour, j.minute) for j
+                                 in clouddata_time])
+        clouddata_date_bool = clouddata_time == date
+        if np.all(clouddata_date_bool == False):
+            cloudscreen = np.zeros(clouddata.variables['cloud_mask'][0].shape)
+            print 'No date for this time in this file! Replaced array with ' \
+                  'nans!'
+            cloudscreen[:] = np.nan
+        else:
+            cloudscreen = clouddata.variables['cloud_mask'][clouddata_date_bool][0]
+
+    if None in list(btdata_time):
+        print 'No dates in BT file! Replaced arrays with nan.'
+        channel_087 = np.zeros(btdata.variables['channel_087'][0].shape)
+        channel_087[:] = np.nan
+        channel_108 = np.zeros(btdata.variables['channel_087'][0].shape)
+        channel_108[:] = np.nan
+        channel_120 = np.zeros(btdata.variables['channel_087'][0].shape)
+        channel_120[:] = np.nan
+
+    else:
+        btdata_time = np.asarray([datetime.datetime(j.year, j.month, j.day,
+                                                       j.hour, j.minute) for j
+                                     in btdata_time])
+
+        btdata_date_bool = btdata_time == date
+        channel_087 = btdata.variables['channel_087'][btdata_date_bool]
+        channel_108 = btdata.variables['channel_108'][btdata_date_bool]
+        channel_120 = btdata.variables['channel_120'][btdata_date_bool]
+
+    #cloudscreen = cloudscreen[clouddata_date_bool][0]
+    cloudscreen_bool = np.asarray(cloudscreen != 2)
+    # Note that the below assumes that the lat/long coord variables are not
+    # in mesh grid form
+    #print 'sdf 4'
+    seviribands = np.zeros((3, cloudscreen.shape[0],
+                            cloudscreen.shape[1]))
+
+    #channel_087 = channel_087[btdata_date_bool]
+
+    #channel_120 = channel_120[btdata_date_bool]
+    #print 'sdf 5'
+
+    seviribands[0] = channel_087
+    seviribands[1] = channel_108
+    seviribands[2] = channel_120
+    seviribands[0][cloudscreen_bool == False] = np.nan
+    seviribands[1][cloudscreen_bool == False] = np.nan
+    seviribands[2][cloudscreen_bool == False] = np.nan
+
+    #print 'sdf 6'
+
+    return seviribands, channel_087, channel_108, channel_120
+
+def cloud_screen_mixed(btdata, clouddata, date):
+    """
+    Cloud screens SEVIRI data using EUMETSAT cloud screen
+    :param btdata: an nc Dataset object with the three SEVIRI bands for 10.8,
+    12.0, 8.7 BTs
+    :param cloudscreendata: an nc Dataset object from EUMETSAT's SEVIRI cloud
+    screen
+    :return cloudscreenedbt: cloud screened SEVIRI band array for the given
+    day
+    """
+    clouddata_time = num2date(clouddata.variables['time'][:],
+                              clouddata.variables['time'].units)
+    clouddata_time = np.asarray([datetime.datetime(j.year, j.month, j.day,
+                                                   j.hour, j.minute) for j
+                                 in clouddata_time])
+
+    clouddata_date_bool = np.asarray([j == date for j in clouddata_time])
+
+    cloudscreen = clouddata.variables['cloud_mask'][:]
+    cloudscreen = cloudscreen[clouddata_date_bool][0]
+    cloudscreen_bool = np.asarray(cloudscreen != 2)
+    # Note that the below assumes that the lat/long coord variables are not
+    # in mesh grid form
+    seviribands = np.zeros((3, cloudscreen.shape[0],
+                            cloudscreen.shape[1]))
+    channel_087 = btdata.variables['channel_087'][:]
+    channel_108 = btdata.variables['channel_108'][:]
+    channel_120 = btdata.variables['channel_120'][:]
+
+    seviribands[0] = channel_087
+    seviribands[1] = channel_108
+    seviribands[2] = channel_120
+    seviribands[0][cloudscreen_bool == False] = np.nan
+    seviribands[1][cloudscreen_bool == False] = np.nan
+    seviribands[2][cloudscreen_bool == False] = np.nan
+
+    return seviribands, channel_087, channel_108, channel_120
+
 def extract_15day_mean(cloudscreenedbt_15day):
     """
     Finds the 15 day time mean of the BT10.8-8.7 channels around a given day
@@ -70,16 +185,16 @@ def generate_dust_mask(noncloudscreenedarray, cloudscreenedarray,
     chosen day
     :return: arrays with dust masks for each of the channels
     """
-    BT_87 = noncloudscreenedarray[0, 0]
-    BT_108 = noncloudscreenedarray[0, 1]
-    BT_120 = noncloudscreenedarray[0, 2]
+    BT_87 = noncloudscreenedarray[0]
+    BT_108 = noncloudscreenedarray[1]
+    BT_120 = noncloudscreenedarray[2]
 
     BT_array = np.zeros((BT_87.shape[0], BT_87.shape[1], 3))
     BT_array[:, :, 0] = BT_87
     BT_array[:, :, 1] = BT_108
     BT_array[:, :, 2] = BT_120
 
-    rgb_array = pinkdust.generate_image_from_array(BT_array)
+    #rgb_array = pinkdust.generate_image_from_array(BT_array)
     """
     extent = (-26, 44, 1, 43)
     m = Basemap(projection='cyl', llcrnrlon=extent[0], urcrnrlon=extent[1],
@@ -171,7 +286,7 @@ def generate_SDF(dust_mask_108, dust_mask_108_87, dust_mask_120_108,
     # plt.savefig('dust_mask_sum.png')
     SDF = 1 * (dust_mask_sum >= 4)
 
-    """
+
     # Write an output nc file with an SDF variable
 
     # File description and dimensions
@@ -180,7 +295,7 @@ def generate_SDF(dust_mask_108, dust_mask_108_87, dust_mask_120_108,
                           'regular lat/lon grid.'
     SDFfile.createDimension('time', None)
     SDFfile.createDimension('lat', lats.shape[0])
-    SDFfile.createDimension('lon', lons.shape[1])
+    SDFfile.createDimension('lon', lons.shape[0])
 
     # Variables
     times = SDFfile.createVariable('time', np.float64, ('time'))
@@ -194,6 +309,6 @@ def generate_SDF(dust_mask_108, dust_mask_108_87, dust_mask_120_108,
     times[:] = date2num(datetime, units=times.units, calendar=times.calendar)
     SDFvar[:] = SDF
     SDFfile.close()
-    """
+
 
     return SDF
