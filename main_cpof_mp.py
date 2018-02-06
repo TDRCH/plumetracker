@@ -31,8 +31,13 @@ import pinkdust
 import plotting
 import get_llj_prob_model
 
-def wrapper(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
-               btdiff_2_anom_prev_3, datetimes, datestrings, date_i, lons,
+def wrapper(bt_120_108_anom_m_prev_1, bt_120_108_anom_m_prev_2,
+            bt_120_108_anom_m_prev_3, bt_108_087_anom_m_prev_1,
+            bt_108_087_anom_m_prev_2, bt_108_087_anom_m_prev_3,
+            bt_120_087_anom_m_prev_1, bt_120_087_anom_m_prev_2,
+            bt_120_087_anom_m_prev_3,
+            datetimes,
+            datestrings, date_i, lons,
                lats,
                cloud_lons, cloud_lats,
                daily_clouds=False, double_digits=False, mesh=False,
@@ -45,8 +50,6 @@ def wrapper(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
     totaltest = datetime.datetime.now()
 
     found_file = True
-
-
 
     if daily_bt == False:
         if os.path.isfile('/ouce-home/data/satellite/meteosat/seviri/15-min/'
@@ -269,6 +272,18 @@ def wrapper(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
 
         btdiff_2_15daymean = bt_15day_120_mean - bt_15day_087_mean
 
+        bt_108_087 = bt108 - bt087
+        bt_120_108 = bt12 - bt108
+        bt_120_087 = bt12 - bt087
+
+        bt_108_087_mean = bt_15day_108_mean - bt_15day_087_mean
+        bt_120_108_mean = bt_15day_120_mean - bt_15day_108_mean
+        bt_120_087_mean = bt_15day_120_mean - bt_15day_087_mean
+
+        bt_108_087_anom = bt_108_087 - bt_108_087_mean
+        bt_120_108_anom = bt_120_108 - bt_120_108_mean
+        bt_120_087_anom = bt_120_087 - bt_120_087_mean
+
 
         if mesh:
             cloud_lons, cloud_lats = np.meshgrid(cloud_lons, cloud_lats)
@@ -277,64 +292,72 @@ def wrapper(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
                                                     orig_lons, orig_lats,
                                                     clouds_now, mesh=True)
 
+        bt_108_087_anom_m = deepcopy(bt_108_087_anom)
+        bt_120_087_anom_m = deepcopy(bt_120_087_anom)
+        bt_120_108_anom_m = deepcopy(bt_120_108_anom)
 
-        """
+        clouds_now_regridded[sdf_now == 1] = 0
 
-        bt087_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
-                                               cloud_lons,
-                                               cloud_lats, bt087, mesh=True)
+        bt_108_087_anom_m[clouds_now_regridded == 1] = np.nan
+        bt_120_087_anom_m[clouds_now_regridded == 1] = np.nan
+        bt_120_108_anom_m[clouds_now_regridded == 1] = np.nan
 
-        bt12_regridded = pinkdust.regrid_data(orig_lons, orig_lats,
-                                              cloud_lons,
-                                              cloud_lats, bt12, mesh=True)
+        #btdiff_2 = bt12 - bt087
+        #btdiff_2_anom = btdiff_2 - btdiff_2_15daymean
 
-        btdiff_2_15daymean_regridded = pinkdust.regrid_data(orig_lons,
-                                                            orig_lats,
-                                                            cloud_lons,
-                                                            cloud_lats,
-                                                            btdiff_2_15daymean, mesh=True)
+        if bt_108_087_anom_m_prev_1 != None:
 
-        """
+            arra = (bt_120_087_anom_m - bt_120_087_anom_m_prev_3) + (
+                bt_120_087_anom_m - bt_120_087_anom_m_prev_2) + (
+                       bt_120_087_anom_m - bt_120_087_anom_m_prev_1)
 
-        btdiff_2 = bt12 - bt087
-        btdiff_2_anom = btdiff_2 - btdiff_2_15daymean
+            arrb = (bt_120_108_anom_m - bt_120_108_anom_m_prev_3) + (
+                bt_120_108_anom_m- bt_120_108_anom_m_prev_2) + (
+                       bt_120_108_anom_m - bt_120_108_anom_m_prev_1)
 
-        if btdiff_2_anom_prev_3 != None:
+            arrc = (bt_108_087_anom_m - bt_108_087_anom_m_prev_3) + (
+                bt_108_087_anom_m - bt_108_087_anom_m_prev_2) + (
+                       bt_108_087_anom_m - bt_108_087_anom_m_prev_1)
 
-            btdiff_2_anom_diff = btdiff_2_anom - btdiff_2_anom_prev_3
-            btdiff_2_anom_diff += \
-                (btdiff_2_anom - btdiff_2_anom_prev_2)
-            btdiff_2_anom_diff += \
-                (btdiff_2_anom - btdiff_2_anom_prev)
+            detected_bt = (arrc - arrb) + (arra - arrb)
+
         else:
-            btdiff_2_anom_diff = np.zeros((btdiff_2_anom.shape))
+            detected_bt = np.zeros((bt_108_087_anom.shape))
 
         if date_i == 0:
-            btdiff_2_anom_prev = deepcopy(btdiff_2_anom)
+            bt_120_087_anom_m_prev_1 = deepcopy(bt_120_087_anom_m)
+            bt_120_108_anom_m_prev_1 = deepcopy(bt_120_108_anom_m)
+            bt_108_087_anom_m_prev_1 = deepcopy(bt_108_087_anom_m)
         elif date_i == 1:
-            btdiff_2_anom_prev_2 = deepcopy(btdiff_2_anom_prev)
-            btdiff_2_anom_prev = deepcopy(btdiff_2_anom)
+            bt_120_087_anom_m_prev_2 = deepcopy(bt_120_087_anom_m_prev_1)
+            bt_120_108_anom_m_prev_2 = deepcopy(bt_120_108_anom_m_prev_1)
+            bt_108_087_anom_m_prev_2 = deepcopy(bt_108_087_anom_m_prev_1)
+            bt_120_087_anom_m_prev_1 = deepcopy(bt_120_087_anom_m)
+            bt_120_108_anom_m_prev_1 = deepcopy(bt_120_108_anom_m)
+            bt_108_087_anom_m_prev_1 = deepcopy(bt_108_087_anom_m)
         elif date_i == 2:
-            btdiff_2_anom_prev_3 = deepcopy(btdiff_2_anom_prev_2)
-            btdiff_2_anom_prev_2 = deepcopy(btdiff_2_anom_prev)
-            btdiff_2_anom_prev = deepcopy(btdiff_2_anom)
+            bt_120_087_anom_m_prev_3 = deepcopy(bt_120_087_anom_m_prev_2)
+            bt_120_108_anom_m_prev_3 = deepcopy(bt_120_108_anom_m_prev_2)
+            bt_108_087_anom_m_prev_3 = deepcopy(bt_108_087_anom_m_prev_2)
+            bt_120_087_anom_m_prev_2 = deepcopy(bt_120_087_anom_m_prev_1)
+            bt_120_108_anom_m_prev_2 = deepcopy(bt_120_108_anom_m_prev_1)
+            bt_108_087_anom_m_prev_2 = deepcopy(bt_108_087_anom_m_prev_1)
+            bt_120_087_anom_m_prev_1 = deepcopy(bt_120_087_anom_m)
+            bt_120_108_anom_m_prev_1 = deepcopy(bt_120_108_anom_m)
+            bt_108_087_anom_m_prev_1 = deepcopy(bt_108_087_anom_m)
         elif date_i > 2:
-            btdiff_2_anom_prev_3 = deepcopy(btdiff_2_anom_prev_2)
-            btdiff_2_anom_prev_2 = deepcopy(btdiff_2_anom_prev)
-            btdiff_2_anom_prev = deepcopy(btdiff_2_anom)
+            bt_120_087_anom_m_prev_3 = deepcopy(bt_120_087_anom_m_prev_2)
+            bt_120_108_anom_m_prev_3 = deepcopy(bt_120_108_anom_m_prev_2)
+            bt_108_087_anom_m_prev_3 = deepcopy(bt_108_087_anom_m_prev_2)
+            bt_120_087_anom_m_prev_2 = deepcopy(bt_120_087_anom_m_prev_1)
+            bt_120_108_anom_m_prev_2 = deepcopy(bt_120_108_anom_m_prev_1)
+            bt_108_087_anom_m_prev_2 = deepcopy(bt_108_087_anom_m_prev_1)
+            bt_120_087_anom_m_prev_1 = deepcopy(bt_120_087_anom_m)
+            bt_120_108_anom_m_prev_1 = deepcopy(bt_120_108_anom_m)
+            bt_108_087_anom_m_prev_1 = deepcopy(bt_108_087_anom_m)
 
         if daily_clouds:
             clouds_now_regridded = clouds_now_regridded > 1
-
-        lat_grad, lon_grad = np.gradient(btdiff_2_anom)
-        total_grad = np.sqrt(lat_grad ** 2 + lon_grad ** 2)
-        convolution = scipy.signal.convolve2d(clouds_now_regridded,
-                                              np.ones((5,
-                                                       5)),
-                                              mode='same')
-        clouds_now = convolution > 0
-        clouds_now[sdf_now == 1] = 0
-        total_grad[clouds_now == 1] = np.nan
 
         ### PASS I ###
         # In the FIRST PASS the LORD sayeth unto the image, 'Let all
@@ -343,22 +366,16 @@ def wrapper(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
         # And those who fulfilled this condition were classified,
         # and it was good
 
-        convolution = scipy.signal.convolve2d(clouds_now,
-                                              np.ones((5,
-                                                       5)),
-                                              mode='same')
-        clouds_now = convolution > 0
-
         # NOTE: Why cloud mask here? What if there was a strong cloud
         # gradient in the previous three timesteps which disappeared in this
         #  one but still pushed us over the threshold? It wouldn't be cloud
         # masked
-        btdiff_2_anom_diff_um = deepcopy(btdiff_2_anom_diff)
-        if cloud_mask:
-            btdiff_2_anom_diff[clouds_now > 0] = np.nan
+        detected_bt_um = deepcopy(detected_bt)
+        #if cloud_mask:
+        #   detected_bt[clouds_now > 0] = np.nan
 
         levels = np.arange(-24, 40, 8)
-        cpo_mask_pass_1 = btdiff_2_anom_diff < -7
+        cpo_mask_pass_1 = detected_bt < -6
 
         label_objects, nb_labels = ndi.label(cpo_mask_pass_1)
 
@@ -390,7 +407,7 @@ def wrapper(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
             # First check if this region is within the original
             # time-gradient identified region (i.e. not one introduced
             # with the new generous gradient checker)
-            if np.any(btdiff_2_anom_diff[target_region == 1] < -15):
+            if np.any(detected_bt[target_region == 1] < -20):
                 # Next check if there is a generous gradient contained
                 # within this region somewhere
                 pass
@@ -400,7 +417,7 @@ def wrapper(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
         # For identified CPO regions, undo the convolution on the cloud
         # mask
 
-        cpo_mask_um = btdiff_2_anom_diff_um < -7
+        cpo_mask_um = detected_bt_um < -6
         # Label the image and get all connected elements
         cpo_mask_um, num = measurements.label(cpo_mask_um)
 
@@ -444,7 +461,7 @@ def wrapper(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
             cmap = cm.get_cmap('Blues_r')
             norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
 
-            m.pcolormesh(orig_lons, orig_lats, btdiff_2_anom_diff,
+            m.pcolormesh(orig_lons, orig_lats, detected_bt,
                          cmap=cmap, vmin=min, vmax=max, norm=norm)
 
             cbar = plt.colorbar(orientation='horizontal', fraction=0.056,
@@ -597,8 +614,13 @@ def wrapper(btdiff_2_anom_prev, btdiff_2_anom_prev_2,
                 cbar.remove()
                 plot.remove()
 
-        return cpo_mask_pass_2, btdiff_2_anom_prev, btdiff_2_anom_prev_2, \
-               btdiff_2_anom_prev_3
+        return cpo_mask_pass_2, bt_120_108_anom_m, \
+               bt_120_108_anom_m_prev_1, bt_120_108_anom_m_prev_2, \
+               bt_120_108_anom_m_prev_3, bt_108_087_anom_m,\
+               bt_108_087_anom_m_prev_1, bt_108_087_anom_m_prev_2, \
+               bt_108_087_anom_m_prev_3, bt_120_087_anom_m,\
+               bt_120_087_anom_m_prev_1, bt_120_087_anom_m_prev_2, \
+               bt_120_087_anom_m_prev_3
     else:
         if mesh:
             empty_arr = np.zeros((lats.shape[0], lons.shape[1]))
@@ -659,9 +681,15 @@ if __name__ == '__main__':
         'NorthAfrica')
     cloud_lons, cloud_lats = target_area.get_lonlats()
 
-    btdiff_2_anom_prev = None
-    btdiff_2_anom_prev_2 = None
-    btdiff_2_anom_prev_3 = None
+    bt_120_108_anom_m_prev_1 = None
+    bt_120_108_anom_m_prev_2 = None
+    bt_120_108_anom_m_prev_3 = None
+    bt_108_087_anom_m_prev_1 = None
+    bt_108_087_anom_m_prev_2 = None
+    bt_108_087_anom_m_prev_3 = None
+    bt_120_087_anom_m_prev_1 = None
+    bt_120_087_anom_m_prev_2 = None
+    bt_120_087_anom_m_prev_3 = None
 
     cpo_prev_1 = None
     cpo_prev_2 = None
@@ -670,10 +698,18 @@ if __name__ == '__main__':
 
     for date_i in np.arange(0, len(datetimes)):
         print datetimes[date_i]
-        cpo_now, btdiff_2_anom_prev, btdiff_2_anom_prev_2, \
-        btdiff_2_anom_prev_3 = wrapper(
-            btdiff_2_anom_prev, btdiff_2_anom_prev_2,
-            btdiff_2_anom_prev_3, datetimes, datestrings, date_i,
+        cpo_now, bt_120_108_anom_m, \
+               bt_120_108_anom_m_prev_1, bt_120_108_anom_m_prev_2, \
+               bt_120_108_anom_m_prev_3, bt_108_087_anom_m,\
+               bt_108_087_anom_m_prev_1, bt_108_087_anom_m_prev_2, \
+               bt_108_087_anom_m_prev_3, bt_120_087_anom_m,\
+               bt_120_087_anom_m_prev_1, bt_120_087_anom_m_prev_2, \
+               bt_120_087_anom_m_prev_3 = wrapper(
+            bt_120_108_anom_m_prev_1, bt_120_108_anom_m_prev_2,
+            bt_120_108_anom_m_prev_3, bt_108_087_anom_m_prev_1,
+            bt_108_087_anom_m_prev_2, bt_108_087_anom_m_prev_3,
+            bt_120_087_anom_m_prev_1, bt_120_087_anom_m_prev_2,
+            bt_120_087_anom_m_prev_3, datetimes, datestrings, date_i,
             lons, lats,
             cloud_lons, cloud_lats,
             daily_cloudmask, double_digits, mesh, daily_bt)
